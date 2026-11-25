@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "probe_id": "p-fixture-WRONG",
+  "status": "ok",
+  "mode": "mock",
+  "server_total_ms": 0.0,
+  "results": [
+    {
+      "model_id": "dinov2_vits14",
+      "width": 224,
+      "height": 224,
+      "cluster_map_png_base64": "iVBORw0KGgoAAAANSUhEUgAAAOAAAADgCAAAAAA/RjU9AAABhUlEQVR4nO3cwQ2AMBADwc2S/mumA8QDQrRiCrDOb0s3uDB43huZVyRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRurt4KVpM4iZM4iZM4iZM4iZM4iZM4iZM4iZM4iZM4iZM4iZM4iZM4iZM4iZO4+WDDsWOUxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxM2DHf0/nW6TOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOImTOL8+4G0n0OEB0U0Viy8AAAAASUVORK5CYII=",
+      "attention": [
+        0.009,
+        0.002,
+        0.003,
+        0.006,
+        0.008,
+        0.004,
+        0.001,
+        0.005
+      ],
+      "attention_norm": [
+        1.0,
+        0.22222222222222224,
+        0.33333333333333337,
+        0.6666666666666667,
+        0.888888888888889,
+        0.4444444444444445,
+        0.11111111111111112,
+        0.5555555555555556
+      ],
+      "upsampler": "nearest",
+      "matched_to": null,
+      "timings_ms": {
+        "encode": 0.0,
+        "cluster": 0.0,
+        "featup": null,
+        "assign": 0.0,
+        "match": null
+      }
+    }
+  ]
+}

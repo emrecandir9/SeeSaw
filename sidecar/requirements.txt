@@ -4,4 +4,4 @@ uvicorn==0.54.0
 python-multipart==0.0.34
 numpy==2.4.6  # numpy 2.5 needs Python >= 3.12; we target 3.11
 pillow==13.0.0
-httpx==0.28.1  # FastAPI test client
+httpx2==2.16.2  # FastAPI test client (Starlette 1.x deprecates httpx)
