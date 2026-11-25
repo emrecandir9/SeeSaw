@@ -7,6 +7,10 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
+# FeatUp normalizes every backbone's input with these (featup/util.py `norm`).
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+
 
 @dataclass
 class EncoderOutput:

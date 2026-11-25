@@ -15,12 +15,10 @@ from contract import GRID, K, ContractError, ProbeRequest, build_result, ok_body
 from processing.grouping import cluster_patches, group_attention, relabel_by_height, upsample_nearest
 from processing.history import ProbeHistory
 
-from models.base import EncoderOutput, QKVClsAttention, finish, pick_device, synchronize, to_input  # noqa: F401
+from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, QKVClsAttention, finish, pick_device, synchronize, to_input  # noqa: F401
 
 HUB_REPO = "facebookresearch/dinov2:7764ea0f912e53c92e82eb78a2a1631e92725fc8"
 MODEL_ID = "dinov2_vits14"
-IMAGENET_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_STD = (0.229, 0.224, 0.225)
 log = logging.getLogger("seesaw.dinov2")
 
 
