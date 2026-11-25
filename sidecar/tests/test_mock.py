@@ -92,3 +92,18 @@ def test_history_is_per_session(backend):
     backend.handle(request("p-0", session="a"), "valid")
     body = backend.handle(request("p-1", match_against={"dinov2_vits14": "p-0"}, session="b"), "valid")
     assert body["results"][0]["matched_to"] is None
+
+
+def test_invalid_labels_applies_to_model_b_alone(backend):
+    body = backend.handle(request(models=("mock_model_b",)), "invalid_labels")
+    assert 9 in decode_label_png(body["results"][0]["cluster_map_png_base64"])
+    assert body["results"][0]["model_id"] == "mock_model_b"
+
+
+@pytest.mark.parametrize("scenario", ["stale", "wrong_id"])
+def test_paired_scenarios_keep_paired_maps(backend, scenario):
+    models = ("dinov2_vits14", "mock_model_b")
+    valid = backend.handle(request("p-0", models=models), "valid")
+    other = backend.handle(request("p-1", models=models), scenario)
+    for a, b in zip(valid["results"], other["results"]):
+        assert a["cluster_map_png_base64"] == b["cluster_map_png_base64"]

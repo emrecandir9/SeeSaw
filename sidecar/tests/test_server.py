@@ -99,3 +99,99 @@ def test_concurrent_requests_both_answered():
     for thread in threads:
         thread.join()
     assert statuses == [200, 200]
+
+
+class CountingBackend:
+    """Records how many handle() calls overlap."""
+
+    models = ["dinov2_vits14"]
+    device = "none"
+
+    def __init__(self):
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.guard = threading.Lock()
+
+    def handle(self, req, scenario):
+        import time
+
+        with self.guard:
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        time.sleep(0.1)
+        with self.guard:
+            self.in_flight -= 1
+        return {"schema_version": 1, "probe_id": req.probe_id, "status": "ok", "mode": "real",
+                "server_total_ms": 0.0, "results": []}
+
+
+def _post_concurrently(client, n=3):
+    statuses = []
+    threads = [
+        threading.Thread(target=lambda i=i: statuses.append(post(client, meta=metadata(probe_id=f"p-{i}")).status_code))
+        for i in range(n)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return statuses
+
+
+def test_model_calls_are_serialized():
+    backend = CountingBackend()
+    statuses = _post_concurrently(TestClient(create_app(backend, "real")))
+    assert statuses == [200, 200, 200]
+    assert backend.max_in_flight == 1
+
+
+def test_mock_delay_queues_like_a_model():
+    import time
+
+    client = make_client(delay_ms=200)
+    started = time.perf_counter()
+    assert _post_concurrently(client, 2) == [200, 200]
+    assert time.perf_counter() - started >= 0.4
+
+
+def test_malformed_multipart_is_contract_400():
+    response = make_client().post(
+        "/probe", content=b"garbage", headers={"Content-Type": "multipart/form-data"}
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["error"]["code"] == "invalid_input"
+
+
+def test_unknown_scenario_keeps_probe_id():
+    response = post(make_client(), headers={"X-Mock-Scenario": "explode"})
+    assert response.json()["probe_id"] == "p-1"
+
+
+def test_missing_image_keeps_probe_id():
+    response = make_client().post("/probe", data={"metadata": metadata()})
+    assert response.status_code == 400
+    assert response.json()["probe_id"] == "p-1"
+
+
+def test_scenario_header_rejected_in_real_mode():
+    client = TestClient(create_app(CountingBackend(), "real"))
+    response = post(client, headers={"X-Mock-Scenario": "valid"})
+    assert response.status_code == 400
+    assert "mock mode" in response.json()["error"]["message"]
+    assert response.json()["probe_id"] == "p-1"
+
+
+def test_default_scenario_ignored_in_real_mode():
+    client = TestClient(create_app(CountingBackend(), "real", default_scenario="failure"))
+    assert post(client).status_code == 200
+
+
+@pytest.mark.parametrize("flags", [["--scenario", "failure"], ["--delay-ms", "100"]])
+def test_mock_flags_require_mock(flags):
+    from server import main
+
+    with pytest.raises(SystemExit) as info:
+        main(flags)
+    assert info.value.code == 2  # argparse usage error, before any model is loaded

@@ -109,20 +109,24 @@ def _parse_metadata(metadata_json: str) -> dict:
 
 
 def _decode_image(image_bytes: bytes, probe_id: str) -> np.ndarray:
+    unreadable = (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError, SyntaxError)
     try:
-        image = Image.open(io.BytesIO(image_bytes))
-        if image.format != "PNG":
-            raise invalid(f"image must be a PNG, got {image.format}", probe_id)
-        image.load()
-    except ContractError:
-        raise
-    except (UnidentifiedImageError, OSError, ValueError, SyntaxError) as exc:
+        image = Image.open(io.BytesIO(image_bytes))  # reads the header only
+    except unreadable as exc:
         raise invalid(f"image is not a readable PNG: {exc}", probe_id) from None
 
+    # Check the header before decoding pixels, so a wrong or huge image costs nothing.
+    if image.format != "PNG":
+        raise invalid(f"image must be a PNG, got {image.format}", probe_id)
     if image.size != (IMAGE_SIZE, IMAGE_SIZE):
         raise invalid(f"image must be {IMAGE_SIZE}x{IMAGE_SIZE}, got {image.width}x{image.height}", probe_id)
     if image.mode not in ("RGB", "RGBA"):
         raise invalid(f"image must be RGB or RGBA, got mode {image.mode}", probe_id)
+
+    try:
+        image.load()
+    except unreadable as exc:
+        raise invalid(f"image is not a readable PNG: {exc}", probe_id) from None
     return np.asarray(image.convert("RGB"), dtype=np.uint8).copy()
 
 

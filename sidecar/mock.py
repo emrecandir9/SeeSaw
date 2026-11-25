@@ -16,13 +16,6 @@ from processing.history import ProbeHistory
 SCENARIOS = ("valid", "invalid_labels", "wrong_id", "stale", "failure", "unavailable")
 MOCK_MODELS = ("dinov2_vits14", "mock_model_b")
 
-_SCENARIO_FIXTURE = {
-    "invalid_labels": "invalid_labels",
-    "wrong_id": "wrong_id",
-    "stale": "stale_match_against",
-}
-
-
 class MockBackend:
     device = "none"
 
@@ -52,13 +45,11 @@ class MockBackend:
         return ok_body(probe_id, "mock", results, 0.0)
 
     def _result_for(self, model: str, req: ProbeRequest, scenario: str) -> dict:
-        if scenario in _SCENARIO_FIXTURE and model == "dinov2_vits14":
-            source = self._fixtures[_SCENARIO_FIXTURE[scenario]]
-        elif req.models == ["dinov2_vits14"]:
-            source = self._fixtures["one_model_valid"]
-        else:
-            source = self._fixtures["paired_valid"]
+        source = self._fixtures["one_model_valid" if req.models == ["dinov2_vits14"] else "paired_valid"]
         result = copy.deepcopy(next(r for r in source["results"] if r["model_id"] == model))
+        if scenario == "invalid_labels" and model == req.models[0]:
+            bad_map = self._fixtures["invalid_labels"]["results"][0]["cluster_map_png_base64"]
+            result["cluster_map_png_base64"] = bad_map  # contains label 9
 
         wanted = req.match_against.get(model)
         known = wanted is not None and self.history.get(req.session_id, model, wanted) is not None

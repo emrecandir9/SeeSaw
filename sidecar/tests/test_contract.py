@@ -110,3 +110,30 @@ def test_build_result_shape():
     assert result["attention_norm"][0] == 0.0
     np.testing.assert_array_equal(decode_label_png(result["cluster_map_png_base64"]), labels)
     json.dumps(result)  # must be JSON-serializable
+
+
+def _png_with_header_size(width: int, height: int) -> bytes:
+    """A valid 1x1 PNG whose IHDR claims another size (CRC fixed up)."""
+    import struct
+    import zlib
+
+    data = bytearray(png_bytes(rgb_image(1)))
+    ihdr = 8  # after the PNG signature: length(4) type(4) data(13) crc(4)
+    data[ihdr + 8 : ihdr + 16] = struct.pack(">II", width, height)
+    crc = zlib.crc32(bytes(data[ihdr + 4 : ihdr + 21])) & 0xFFFFFFFF
+    data[ihdr + 21 : ihdr + 25] = struct.pack(">I", crc)
+    return bytes(data)
+
+
+def test_decompression_bomb_is_400():
+    with pytest.raises(ContractError) as info:
+        parse_request(_png_with_header_size(20000, 20000), metadata())
+    assert info.value.status == 400
+    assert info.value.probe_id == "p-1"
+
+
+def test_oversized_header_rejected_before_decoding():
+    # Claims 4000x4000 but holds 1x1 of pixel data: must fail on size, not on decoding.
+    with pytest.raises(ContractError) as info:
+        parse_request(_png_with_header_size(4000, 4000), metadata())
+    assert "224x224" in info.value.message

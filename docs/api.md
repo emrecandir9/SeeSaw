@@ -85,7 +85,7 @@ If the server matched against its own latest output and the client then discarde
 | `matched_to` | The `probe_id` these groups were matched against, or `null` when this result is a reset (no `match_against`, unknown ID or `reset_history`). Lets the client detect that colors may change. Always `null` until matching lands (E3, 3 Dec). |
 | `timings_ms` | Per-model stage times. `null` = stage did not run. GPU work is synchronized before each time is taken. |
 
-Group IDs before matching exists: groups are numbered by image-space height (group 0 has the highest mean row on screen), as in the paper, so the same image always gives the same IDs.
+Group IDs before matching exists: groups are numbered by image-space height, as in the paper. Group 0 is the topmost group on screen (smallest mean row index, since rows count downward), so the same image always gives the same IDs.
 
 ## Errors
 
@@ -102,7 +102,7 @@ No partial results: either every requested model succeeded, or the response is a
 
 | HTTP | `code` | When |
 | --- | --- | --- |
-| 400 | `invalid_input` | Bad metadata, image not a 224 × 224 RGB/RGBA PNG, missing form part, unknown mock scenario |
+| 400 | `invalid_input` | Bad metadata, image not a 224 × 224 RGB/RGBA PNG, missing form part, malformed multipart body, unknown mock scenario, `X-Mock-Scenario` sent to a real server |
 | 503 | `model_unavailable` | A requested model is not loaded |
 | 500 | `processing_error` | Anything that failed while processing |
 
@@ -125,13 +125,13 @@ python server.py --mock [--scenario NAME] [--delay-ms N]
 - Validates requests exactly like real mode, then answers from `sidecar/fixtures/contract/`.
 - Models: `dinov2_vits14` and `mock_model_b` (a stand-in until model B is chosen on 1 Dec).
 - `matched_to` behaves like the real server will: it echoes `match_against` if the mock served that probe in this session, else `null`.
-- `--delay-ms` waits before answering, to test busy state, late results and timeouts.
+- `--delay-ms` waits before answering, inside the same one-at-a-time lock as a real model call, to test busy state, late results and timeouts. `--scenario` and `--delay-ms` are refused without `--mock`.
 - Force a case per request with the header `X-Mock-Scenario` (or for every request with `--scenario`):
 
 | Scenario | Response | What the client should do |
 | --- | --- | --- |
 | `valid` (default) | 200 | Apply it |
-| `invalid_labels` | 200, map contains value 9 | Reject the result, keep the previous overlay |
+| `invalid_labels` | 200, the first requested model's map contains value 9 | Reject the result, keep the previous overlay |
 | `wrong_id` | 200, `probe_id` ≠ request | Discard it |
 | `stale` | 200, `matched_to: null` although `match_against` was sent | Apply; colors may change |
 | `failure` | 500 `processing_error` | Show the error, keep the previous overlay, allow retry |
