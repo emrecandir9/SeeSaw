@@ -94,3 +94,26 @@ def test_cluster_patches_uniform_input():
     assert labels.shape == (256,)
     assert centroids.shape == (8, 32)
     assert labels.min() >= 0 and labels.max() < 8
+
+
+def test_cluster_patches_runs_single_threaded(monkeypatch):
+    # OpenBLAS starts one thread per core (24 on the lab machine): K-means on a
+    # 256 x 384 matrix then took ~110 ms instead of ~10 ms.
+    pytest.importorskip("sklearn")
+    from sklearn.cluster import KMeans
+    from threadpoolctl import threadpool_info
+
+    from processing.grouping import cluster_patches
+
+    seen = []
+    real_fit = KMeans.fit
+
+    def recording_fit(self, *args, **kwargs):
+        seen.append([pool["num_threads"] for pool in threadpool_info()])
+        return real_fit(self, *args, **kwargs)
+
+    monkeypatch.setattr(KMeans, "fit", recording_fit)
+    features = np.random.default_rng(0).normal(size=(64, 16)).astype(np.float32)
+    cluster_patches(features, 8)
+    assert seen and seen[0], "no thread pools seen during fit"
+    assert all(n == 1 for n in seen[0]), seen

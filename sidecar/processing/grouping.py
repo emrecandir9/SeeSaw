@@ -73,8 +73,11 @@ def cluster_patches(features: np.ndarray, k: int = 8, seed: int = 0) -> tuple[np
 
     from sklearn.cluster import KMeans
     from sklearn.exceptions import ConvergenceWarning
+    from threadpoolctl import threadpool_limits
 
-    with warnings.catch_warnings():
+    # One thread: the data is tiny, and OpenBLAS's default of one thread per core
+    # made this ~110 ms instead of ~10 ms on the 24-core lab machine.
+    with warnings.catch_warnings(), threadpool_limits(limits=1):
         # Fewer distinct features than k (e.g. a blank image) is expected, not an error.
         warnings.simplefilter("ignore", ConvergenceWarning)
         kmeans = KMeans(n_clusters=k, n_init=10, random_state=seed).fit(features)

@@ -37,6 +37,11 @@ def test_defaults():
     assert req.reset_history is False
 
 
+def test_match_against_null_means_absent():
+    req = parse_request(png_bytes(rgb_image()), metadata(match_against=None))
+    assert req.match_against == {}
+
+
 def test_match_against_ignores_unrequested_models():
     req = parse_request(png_bytes(rgb_image()), metadata(match_against={"dinov2_vits14": "p-0", "other": "p-9"}))
     assert req.match_against == {"dinov2_vits14": "p-0"}
@@ -58,6 +63,14 @@ BAD_CASES = {
     "no_models": (GOOD_PNG, metadata(models=[])),
     "duplicate_models": (GOOD_PNG, metadata(models=["dinov2_vits14", "dinov2_vits14"])),
     "match_against_int": (GOOD_PNG, metadata(match_against={"dinov2_vits14": 3})),
+    "schema_true": (GOOD_PNG, metadata(schema_version=True)),  # JSON true == 1 in Python
+    "schema_float": (GOOD_PNG, metadata(schema_version=1.0)),
+    "schema_string": (GOOD_PNG, metadata(schema_version="1")),
+    "match_against_list": (GOOD_PNG, metadata(match_against=[])),
+    "match_against_false": (GOOD_PNG, metadata(match_against=False)),
+    "match_against_zero": (GOOD_PNG, metadata(match_against=0)),
+    "match_against_empty_string": (GOOD_PNG, metadata(match_against="")),
+    "match_against_empty_value": (GOOD_PNG, metadata(match_against={"dinov2_vits14": ""})),
     "reset_not_bool": (GOOD_PNG, metadata(reset_history="yes")),
 }
 
