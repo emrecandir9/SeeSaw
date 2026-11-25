@@ -1,0 +1,49 @@
+name: Task
+description: Planned work from the issue register
+labels: ["task"]
+body:
+  - type: input
+    id: plan_id
+    attributes:
+      label: Plan ID
+      description: ID from the issue register, e.g. E1, G2, B1, Y3
+    validations:
+      required: true
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Owner
+      options: [Emre, Gloria, Biswarup, Yernur]
+    validations:
+      required: true
+  - type: input
+    id: due
+    attributes:
+      label: Due date
+      placeholder: e.g. 1 Dec
+    validations:
+      required: true
+  - type: textarea
+    id: work
+    attributes:
+      label: Work
+      description: What has to be built or decided
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      description: Copy it from the issue register
+    validations:
+      required: true
+  - type: input
+    id: acceptance
+    attributes:
+      label: Acceptance IDs
+      placeholder: e.g. A3, A4
+  - type: input
+    id: deps
+    attributes:
+      label: Depends on
+      placeholder: e.g. #3, #5

@@ -1,0 +1,31 @@
+# Godot (commit *.import metadata, ignore the cache)
+.godot/
+*.translation
+godot/android/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Model weights and caches
+*.pt
+*.pth
+*.ckpt
+.cache/
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+*.keystore
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

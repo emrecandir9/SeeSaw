@@ -1,0 +1,32 @@
+name: Bug
+description: Something does not work as expected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: dropdown
+    id: machine
+    attributes:
+      label: Machine
+      options: [Lab PC + Quest 3S, Lab PC desktop mode, Laptop desktop mode, Mac, Mock sidecar]
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or branch
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots

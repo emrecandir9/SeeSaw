@@ -1,0 +1,22 @@
+# Review routing for the scene ownership map (see CONTRIBUTING.md).
+# Code owners are requested for review automatically. Their approval is not
+# required: any one teammate's approval is enough to merge.
+
+/sidecar/                         @emrecandir9
+
+/godot/project.godot              @gloriacuenco
+/godot/scenes/MainXR.tscn         @gloriacuenco
+/godot/scenes/CaptureRig.tscn     @gloriacuenco
+/godot/scripts/xr/                @gloriacuenco
+/godot/scripts/network/           @gloriacuenco
+
+/godot/scenes/DemoWorld.tscn      @BiswarupMukherjee1
+/godot/shaders/                   @BiswarupMukherjee1
+/godot/scripts/overlay/           @BiswarupMukherjee1
+
+/godot/scenes/ComparisonLens.tscn @KurosJS
+/godot/scenes/LatencyHUD.tscn     @KurosJS
+/godot/scenes/MRMode.tscn         @KurosJS
+/godot/scripts/ui/                @KurosJS
+
+/.github/                         @emrecandir9
