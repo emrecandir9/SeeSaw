@@ -35,11 +35,11 @@ Default address: `http://127.0.0.1:8765` (Link mode, everything on the lab PC). 
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schema_version` | int | Must be `1` |
+| `schema_version` | int | Must be the integer `1` (not `true`, `1.0` or `"1"`) |
 | `probe_id` | non-empty string | Unique per probe; echoed unchanged in the response |
 | `session_id` | non-empty string | Matching history key. New ID or `reset_history` at scene change |
 | `models` | list of unique model IDs | `dinov2_vits14`; add model B only while the lens is on |
-| `match_against` | object, optional | Model ID → `probe_id` of the last result the client **applied** for that model, or `null`. Keys for models not requested are ignored |
+| `match_against` | object, optional | Model ID → `probe_id` of the last result the client **applied** for that model (non-empty string), or `null`. Keys for models not requested are ignored. Omitting it or sending `null` means no matching; any other non-object is rejected |
 | `reset_history` | bool, optional (default `false`) | Forget this session's history before processing |
 
 K is fixed at 8 in v1. The client keeps the capture's view/projection matrices and capture depth keyed by `probe_id`; they are not sent.

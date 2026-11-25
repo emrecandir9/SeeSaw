@@ -74,7 +74,8 @@ def _parse_metadata(metadata_json: str) -> dict:
     def fail(message: str) -> ContractError:
         return invalid(message, probe_id)
 
-    if meta.get("schema_version") != SCHEMA_VERSION:
+    version = meta.get("schema_version")
+    if type(version) is not int or version != SCHEMA_VERSION:  # rejects true and 1.0, which compare equal to 1
         raise fail(f"schema_version must be {SCHEMA_VERSION}")
 
     session_id = meta.get("session_id")
@@ -87,12 +88,14 @@ def _parse_metadata(metadata_json: str) -> dict:
     if len(set(models)) != len(models):
         raise fail("models must not repeat")
 
-    raw_match = meta.get("match_against") or {}
+    raw_match = meta.get("match_against")
+    if raw_match is None:  # absent or null
+        raw_match = {}
     if not isinstance(raw_match, dict):
         raise fail("match_against must be an object of model ID -> probe_id or null")
     for value in raw_match.values():
-        if value is not None and not isinstance(value, str):
-            raise fail("match_against values must be probe_id strings or null")
+        if value is not None and (not isinstance(value, str) or not value):
+            raise fail("match_against values must be non-empty probe_id strings or null")
     match_against = {m: raw_match[m] for m in models if m in raw_match}
 
     reset_history = meta.get("reset_history", False)
