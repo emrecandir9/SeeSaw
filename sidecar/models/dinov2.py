@@ -15,7 +15,17 @@ from contract import GRID, K, ContractError, ProbeRequest, build_result, ok_body
 from processing.grouping import cluster_patches, group_attention, relabel_by_height, upsample_nearest
 from processing.history import ProbeHistory
 
-from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, QKVClsAttention, finish, pick_device, synchronize, to_input  # noqa: F401
+from models.base import (  # noqa: F401
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+    EncoderOutput,
+    QKVClsAttention,
+    channel_norm,
+    finish,
+    pick_device,
+    synchronize,
+    to_input,
+)
 
 HUB_REPO = "facebookresearch/dinov2:7764ea0f912e53c92e82eb78a2a1631e92725fc8"
 MODEL_ID = "dinov2_vits14"
@@ -42,7 +52,9 @@ class Dinov2Encoder:
     def encode(self, image: np.ndarray) -> EncoderOutput:
         x = to_input(image, IMAGENET_MEAN, IMAGENET_STD, self.device)
         tokens = self.model.forward_features(x)["x_norm_patchtokens"][0]  # (256, 384)
-        return finish(tokens, self._attention.cls_row[0], GRID)
+        # FeatUp's featurizer output (use_norm=True): K-means centroids and FeatUp's
+        # upsampled features then live in the same space.
+        return finish(channel_norm(tokens), self._attention.cls_row[0], GRID)
 
 
 class RealBackend:

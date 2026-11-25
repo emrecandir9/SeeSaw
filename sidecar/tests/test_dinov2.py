@@ -187,3 +187,16 @@ def test_identical_features_leave_empty_groups():
     assert result["attention"][1:] == [0.0] * 7
     centroids = backend.history.get("s-1", "dinov2_vits14", "p-u")
     assert (centroids[1:] == 0).all()
+
+
+def test_features_follow_channel_norm(encoder):
+    import torch
+
+    from models.base import IMAGENET_MEAN, IMAGENET_STD, channel_norm, to_input
+
+    image = load("image1.png")
+    out = encoder.encode(image)
+    with torch.inference_mode():
+        tokens = encoder.model.forward_features(to_input(image, IMAGENET_MEAN, IMAGENET_STD, encoder.device))["x_norm_patchtokens"][0]
+        expected = torch.nn.functional.normalize(channel_norm(tokens.float()), dim=-1).cpu().numpy()
+    np.testing.assert_allclose(out.features, expected, atol=1e-5)

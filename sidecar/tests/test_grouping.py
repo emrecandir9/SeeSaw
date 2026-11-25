@@ -117,3 +117,21 @@ def test_cluster_patches_runs_single_threaded(monkeypatch):
     cluster_patches(features, 8)
     assert seen and seen[0], "no thread pools seen during fit"
     assert all(n == 1 for n in seen[0]), seen
+
+
+def test_assign_nearest_picks_closest():
+    from processing.grouping import assign_nearest
+
+    centroids = np.array([[1, 0], [0, 1], [-1, 0]], dtype=np.float32)
+    features = np.array([[0.9, 0.1], [0.1, 0.9], [-1, 0.2]], dtype=np.float32)
+    labels = assign_nearest(features, centroids)
+    assert labels.dtype == np.uint8
+    np.testing.assert_array_equal(labels, [0, 1, 2])
+
+
+def test_assign_nearest_ties_take_lowest_index():
+    from processing.grouping import assign_nearest
+
+    centroids = np.array([[0, 1], [1, 0], [1, 0]], dtype=np.float32)
+    labels = assign_nearest(np.array([[1, 0], [0.5, 0.5]], dtype=np.float32), centroids)
+    np.testing.assert_array_equal(labels, [1, 0])

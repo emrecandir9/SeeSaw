@@ -67,6 +67,15 @@ def upsample_nearest(patch_labels: np.ndarray, size: int = 224) -> np.ndarray:
     return np.repeat(np.repeat(labels, block, axis=0), block, axis=1)
 
 
+def assign_nearest(features: np.ndarray, centroids: np.ndarray) -> np.ndarray:
+    """Label each feature row (N, D) by its nearest centroid (K, D), squared Euclidean;
+    ties go to the lowest index. Used for FeatUp pixel features (paper: nearest patch-level centroid)."""
+    f = np.asarray(features, dtype=np.float32)
+    c = np.asarray(centroids, dtype=np.float32)
+    distances = (c * c).sum(1)[None, :] - 2.0 * (f @ c.T)  # |f|^2 is the same for every centroid
+    return distances.argmin(1).astype(np.uint8)
+
+
 def cluster_patches(features: np.ndarray, k: int = 8, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
     """K-means on patch features. Returns (labels (N,), centroids (k, D))."""
     import warnings

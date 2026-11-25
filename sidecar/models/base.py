@@ -44,6 +44,12 @@ def to_input(image: np.ndarray, mean, std, device: str) -> torch.Tensor:
     return (x - mean) / std
 
 
+def channel_norm(tokens: torch.Tensor) -> torch.Tensor:
+    """FeatUp's ChannelNorm (use_norm=True): LayerNorm over the feature dim. Its
+    checkpoint has no weights for it, so the affine part is the identity."""
+    return torch.nn.functional.layer_norm(tokens, tokens.shape[-1:])
+
+
 def finish(tokens: torch.Tensor, cls_row: torch.Tensor, grid: int) -> EncoderOutput:
     """Patch tokens (grid*grid, dim) and the full CLS attention row (1 + grid*grid,)."""
     features = torch.nn.functional.normalize(tokens.float(), dim=-1)

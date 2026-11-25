@@ -151,3 +151,11 @@ def test_clip_text_tower_stays_on_cpu(encoders):
     assert all(p.device.type == "cpu" for p in enc.model.transformer.parameters())
     assert enc.model.token_embedding.weight.device.type == "cpu"
     assert all(p.device.type == torch.device(enc.device).type for p in enc.model.visual.parameters())
+
+
+def test_channel_norm_matches_featup_layernorm():
+    # FeatUp's ChannelNorm is LayerNorm(dim); its checkpoint has no weights for it, so default init.
+    from models.base import channel_norm
+
+    x = torch.randn(256, 384)
+    torch.testing.assert_close(channel_norm(x), torch.nn.LayerNorm(384)(x).detach(), atol=1e-6, rtol=1e-6)
