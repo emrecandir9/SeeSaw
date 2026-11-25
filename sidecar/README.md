@@ -85,10 +85,13 @@ CI installs only `requirements.txt`, so the real-model tests in `tests/test_dino
 ## Model B comparison (E4)
 
 ```bash
-python tools/compare_models.py --device auto
+python tools/compare_models.py --device auto                      # lab machine, with FeatUp
+python tools/compare_models.py --device auto --upsampler nearest  # laptop, without FeatUp
 ```
 
-Runs DINOv2 (model A) and the candidates CLIP ViT-B/16 (`clip_vitb16`), DINO v1 ViT-S/16 (`dino_vits16`) and supervised ViT-S/16 (`vit_s16_sup`) on `fixtures/images/*.png` (or `--images ...`, each 224 × 224), 10 probes each (`--runs`). Writes `comparison-out/` (git-ignored): one grid per image (input, groups, attention heatmap, groups × attention) and `metrics.md` / `metrics.json` with encode and K-means time, memory, attention checks and agreement with model A (adjusted Rand index). Patch level only; FeatUp comes with E2. All candidates use ImageNet normalization and the token path FeatUp's upsamplers were trained on.
+Runs DINOv2 (model A) and the candidates CLIP ViT-B/16 (`clip_vitb16`), DINO v1 ViT-S/16 (`dino_vits16`) and supervised ViT-S/16 (`vit_s16_sup`) on `fixtures/images/*.png` (or `--images ...`, each 224 × 224), 10 probes each (`--runs`). Writes `comparison-out/` (git-ignored): one grid per image (input, groups, attention heatmap, groups × attention) and `metrics.md` / `metrics.json` with encode, K-means and FeatUp time, peak GPU memory, attention checks and agreement with model A (adjusted Rand index).
+
+As plan p.7 asks ("FeatUp where available"), every model gets its own FeatUp JBU checkpoint (`clip`, `dino16`, `vit` next to `dinov2`, SHA-256 pinned in `models/featup_jbu.py`) and the same pixel labels as model A in the server: ChannelNorm, K-means on patches, nearest patch-level centroid per pixel; attention stays per patch. All candidates use ImageNet normalization and the token path FeatUp's upsamplers were trained on; `tests/test_featup.py` checks each against FeatUp's own hub model (to 1e-4). Without FeatUp the default `--upsampler featup` exits with a hint, as the server does.
 
 ## Fixtures
 
@@ -113,7 +116,7 @@ python tools/make_fixtures.py --with-real   # also recompute model A with DINOv2
 | `mock.py` | Mock backend and scenarios |
 | `models/base.py` | Shared encoder pieces: output type, devices, input normalization, CLS attention hook |
 | `models/dinov2.py` | DINOv2 loading and the real backend |
-| `models/featup_jbu.py` | FeatUp JBU upsampler: pinned checkpoint, availability check |
+| `models/featup_jbu.py` | FeatUp JBU upsamplers: pinned checkpoints per model, availability check |
 | `models/clip_vit.py`, `dino_v1.py`, `vit_sup.py`, `candidates.py` | Model B candidate encoders and the registry |
 | `tools/compare_models.py` | Model B comparison script |
 | `processing/grouping.py` | K-means, group numbering, group attention, upsampling, PNG (numpy only) |

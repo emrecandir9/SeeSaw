@@ -1,11 +1,14 @@
 """Compare model A (DINOv2 ViT-S/14) with the model B candidates on the same images.
 
-    python tools/compare_models.py                       # both test images, all four models
+    python tools/compare_models.py                       # both test images, all four models, FeatUp
     python tools/compare_models.py --images a.png b.png --models dinov2_vits14 clip_vitb16 --runs 10
+    python tools/compare_models.py --upsampler nearest   # without FeatUp (laptop): patch blocks
 
 Writes to --out (default comparison-out/): <image>_grid.png per image, metrics.md and
-metrics.json. Patch level only: FeatUp is added after E2. Numbers from a laptop are
-for development; the lab PC numbers are the ones that count.
+metrics.json. With FeatUp (default, plan p.7) every model uses its own FeatUp JBU
+checkpoint and each pixel takes the nearest patch-level group centroid, as model A
+does in the server. Numbers from a laptop are for development; the lab PC numbers
+are the ones that count.
 """
 
 import argparse
@@ -31,6 +34,8 @@ from processing.grouping import (  # noqa: E402
     cluster_patches,
     group_attention,
     normalize_attention,
+    order_centroids,
+    pixel_labels,
     relabel_by_height,
     upsample_nearest,
 )
@@ -78,22 +83,33 @@ def analyse(encoder, image: np.ndarray, runs: int) -> dict:
 
     if encoder.device.startswith("cuda"):
         torch.cuda.reset_peak_memory_stats()
-    warm = encoder.encode(image)  # warm-up: model and scikit-learn's thread pool
+    warm = encoder.encode(image)  # warm-up: model, FeatUp kernels and scikit-learn's thread pool
+    if warm.upsample is not None:
+        warm.upsample()
     encoder.synchronize()
     cluster_patches(warm.features, K)
 
-    encode_ms, cluster_ms = [], []
+    encode_ms, cluster_ms, featup_ms = [], [], []
     for _ in range(runs):
         t0 = time.perf_counter()
         out = encoder.encode(image)
         encoder.synchronize()
         t1 = time.perf_counter()
-        raw, _ = cluster_patches(out.features, K)
+        raw, centroids = cluster_patches(out.features, K)
         patch_labels = relabel_by_height(raw.reshape(encoder.grid, encoder.grid), K)
         t2 = time.perf_counter()
         encode_ms.append((t1 - t0) * 1000)
         cluster_ms.append((t2 - t1) * 1000)
+        if out.upsample is not None:
+            pixels = out.upsample()  # ends with the copy to the CPU, so the GPU work is done
+            featup_ms.append((time.perf_counter() - t2) * 1000)
 
+    if out.upsample is not None:
+        labels = pixel_labels(pixels, patch_labels, order_centroids(raw, patch_labels, centroids), (IMAGE_SIZE, IMAGE_SIZE))
+        featup = {"ms": _spread(featup_ms), "execution": encoder.execution_path}
+    else:
+        labels, featup = upsample_nearest(patch_labels, IMAGE_SIZE), None
+    # Paper and plan p.6: group attention stays the group mean over each group's patches.
     attention = group_attention(patch_labels, out.patch_attention, K)
     return {
         "model_id": encoder.model_id,
@@ -108,9 +124,10 @@ def analyse(encoder, image: np.ndarray, runs: int) -> dict:
             "top3_share": round(float(np.sort(out.patch_attention.ravel())[-3:].sum() / out.patch_attention.sum()), 3),
         },
         "attention_norm": normalize_attention(attention),
-        "labels": upsample_nearest(patch_labels, IMAGE_SIZE),
+        "labels": labels,
         "patch_attention": out.patch_attention,
-        "featup": None,
+        "upsampler": "nearest" if featup is None else "featup_jbu",
+        "featup": featup,
     }
 
 
@@ -151,7 +168,10 @@ def render_grid(image: np.ndarray, rows: list[dict]) -> Image.Image:
             grid.paste(Image.fromarray(np.clip(cell, 0, 255).astype(np.uint8)), (j * CELL, top + LABEL_H))
         ari = row.get("ari_vs_a")
         name = f"{row['model_id']} (model A)" if row["model_id"] == MODEL_A else row["model_id"]
-        text = f"{name}   ARI vs A: {'-' if ari is None else f'{ari:.2f}'}   encode {row['encode_ms']['median']:.0f} ms"
+        featup = row.get("featup")
+        timing = f"encode {row['encode_ms']['median']:.0f} ms" + (f" + FeatUp {featup['ms']['median']:.0f} ms" if featup else "")
+        groups = "FeatUp JBU" if featup else "nearest"
+        text = f"{name}   ARI vs A: {'-' if ari is None else f'{ari:.2f}'}   {timing}   groups: {groups}"
         draw.text((6, top + 6), text, fill="black", font=font)
     return grid
 
@@ -179,18 +199,22 @@ def _fmt(spread: dict) -> str:
 
 def write_markdown(path: Path, env: dict, results: dict) -> None:
     lines = [
-        "# Model B comparison (patch level)",
+        "# Model B comparison",
         "",
         f"{env['date']} · {env['platform']} · device `{env['device']}` · torch {env['torch']} · commit `{env['commit']}` · {env['runs']} runs per model",
         "",
+        "Groups: FeatUp JBU pixel labels (each model with its own FeatUp checkpoint)."
+        if env["upsampler"] == "featup"
+        else "Groups: nearest (patch blocks, FeatUp off).",
+        "",
     ]
     if not env["device"].startswith("cuda"):
-        lines += ["Development numbers (not the lab PC). FeatUp is not included yet (E2).", ""]
+        lines += ["Development numbers (not the lab PC).", ""]
     for stem, rows in results.items():
         lines += [
             f"## {stem}",
             "",
-            "| Model | Grid | Encode ms, median (min–max) | K-means ms | Memory MB | Attention row sum | Peakedness | Top-3 share | ARI vs A | FeatUp |",
+            "| Model | Grid | Encode ms, median (min–max) | K-means ms | FeatUp ms | Memory MB | Attention row sum | Peakedness | Top-3 share | ARI vs A |",
             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
         for r in rows:
@@ -199,15 +223,18 @@ def write_markdown(path: Path, env: dict, results: dict) -> None:
                 continue
             ari = "-" if r["ari_vs_a"] is None else f"{r['ari_vs_a']:.2f}"
             memory = "n/a" if r["memory_mb"] is None else f"{r['memory_mb']:.0f}"
+            featup = "off" if r["featup"] is None else f"{_fmt(r['featup']['ms'])}, {r['featup']['execution']}"
             lines.append(
-                f"| {r['model_id']} | {r['grid']}×{r['grid']} | {_fmt(r['encode_ms'])} | {_fmt(r['cluster_ms'])} | {memory} | "
-                f"{r['attention']['row_sum']:.3f} | {r['attention']['peakedness']:.1f} | {r['attention']['top3_share']:.0%} | {ari} | not yet (E2) |"
+                f"| {r['model_id']} | {r['grid']}×{r['grid']} | {_fmt(r['encode_ms'])} | {_fmt(r['cluster_ms'])} | {featup} | {memory} | "
+                f"{r['attention']['row_sum']:.3f} | {r['attention']['peakedness']:.1f} | {r['attention']['top3_share']:.0%} | {ari} |"
             )
         lines += ["", f"![{stem}]({stem}_grid.png)", ""]
     lines += [
         "Grid columns: input | groups (8 K-means groups, one colour each) | attention heatmap (dark = low, yellow = high) |",
         "groups x attention (group colour, brighter = more attention; roughly what the headset paints). One row per model, model A first.",
-        "Blocky squares are patches (16x16 grid for DINOv2, 14x14 for the others); FeatUp (E2) makes them follow object edges.",
+        "With FeatUp each pixel takes the nearest patch-level group centroid, so groups follow object edges; without it they are",
+        "patch blocks (16x16 grid for DINOv2, 14x14 for the others). Attention stays per patch (paper), so the heatmap is blocky either way.",
+        "FeatUp ms = JBU upsampling plus the copy of the 224x224 features to the CPU. Memory = peak GPU memory, FeatUp included.",
         "",
         "Peakedness = max / mean of the CLS-to-patch attention (1 = flat, useless for brightness).",
         "Top-3 share = fraction of all patch attention taken by the 3 strongest patches. A high value with high peakedness",
@@ -225,6 +252,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--models", nargs="+", default=ALL_MODELS)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--runs", type=int, default=10)
+    parser.add_argument("--upsampler", choices=["featup", "nearest"], default="featup")
     parser.add_argument("--out", default=str(SIDECAR / "comparison-out"))
     args = parser.parse_args(argv)
 
@@ -233,6 +261,13 @@ def main(argv: list[str] | None = None) -> None:
     from models.base import pick_device
     from models.candidates import load_encoder
 
+    if args.upsampler == "featup":  # refuse up front, as the server does: no silent fallback
+        from models.featup_jbu import FeatUpUnavailable, check_available
+
+        try:
+            check_available()
+        except FeatUpUnavailable as exc:
+            parser.error(str(exc))
     images = _load_images(args.images)
     device = pick_device(args.device)
     out_dir = Path(args.out)
@@ -241,7 +276,7 @@ def main(argv: list[str] | None = None) -> None:
     results: dict[str, dict[str, dict]] = {stem: {} for stem in images}
     for model_id in args.models:  # one model in memory at a time
         try:
-            encoder = load_encoder(model_id, device)
+            encoder = load_encoder(model_id, device, args.upsampler)
             for stem, image in images.items():
                 results[stem][model_id] = analyse(encoder, image, args.runs)
             print(f"{model_id}: done", flush=True)
@@ -276,6 +311,7 @@ def main(argv: list[str] | None = None) -> None:
         "torch": torch.__version__,
         "commit": _git_commit(),
         "runs": args.runs,
+        "upsampler": args.upsampler,
     }
     write_markdown(out_dir / "metrics.md", env, ordered)
     skip = {"labels", "patch_attention", "attention_norm"}

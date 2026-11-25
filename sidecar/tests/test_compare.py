@@ -1,6 +1,8 @@
 """tools/compare_models.py. Needs the ML packages (skipped in CI)."""
 
 import json
+import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -51,7 +53,7 @@ def test_legend_names_every_column():
 
 def test_script_end_to_end(tmp_path):
     pytest.importorskip("timm")
-    main(["--images", IMAGE1, "--models", "dinov2_vits14", "vit_s16_sup", "--runs", "1", "--out", str(tmp_path)])
+    main(["--images", IMAGE1, "--models", "dinov2_vits14", "vit_s16_sup", "--runs", "1", "--upsampler", "nearest", "--out", str(tmp_path)])
     assert (tmp_path / "image1_grid.png").exists()
     assert "vit_s16_sup" in (tmp_path / "metrics.md").read_text()
     data = json.loads((tmp_path / "metrics.json").read_text())
@@ -66,13 +68,15 @@ def test_script_end_to_end(tmp_path):
         assert row["attention"]["peakedness"] >= 1.0
         assert 3 / 196 <= row["attention"]["top3_share"] <= 1.0
         assert row["featup"] is None
+        assert row["upsampler"] == "nearest"
     assert data["environment"]["device"]
+    assert data["environment"]["upsampler"] == "nearest"
     assert "Top-3 share" in (tmp_path / "metrics.md").read_text()
     assert "Grid columns" in (tmp_path / "metrics.md").read_text()
 
 
 def test_bad_model_reported(tmp_path):
-    main(["--images", IMAGE1, "--models", "dinov2_vits14", "nope", "--runs", "1", "--out", str(tmp_path)])
+    main(["--images", IMAGE1, "--models", "dinov2_vits14", "nope", "--runs", "1", "--upsampler", "nearest", "--out", str(tmp_path)])
     data = json.loads((tmp_path / "metrics.json").read_text())
     rows = {r["model_id"]: r for r in data["images"]["image1"]}
     assert "error" in rows["nope"]
@@ -84,5 +88,36 @@ def test_rejects_wrong_size_image(tmp_path):
     bad = tmp_path / "big.png"
     bad.write_bytes(png_bytes(rgb_image(256)))
     with pytest.raises(SystemExit) as info:
-        main(["--images", str(bad), "--models", "dinov2_vits14", "--out", str(tmp_path / "out")])
+        main(["--images", str(bad), "--models", "dinov2_vits14", "--upsampler", "nearest", "--out", str(tmp_path / "out")])
     assert "224x224" in str(info.value)
+
+
+def test_featup_missing_refuses_with_hint(tmp_path, monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "featup", None)  # as on a laptop without the CUDA build
+    with pytest.raises(SystemExit):
+        main(["--images", IMAGE1, "--models", "dinov2_vits14", "--runs", "1", "--out", str(tmp_path)])
+    assert "--upsampler nearest" in capsys.readouterr().err
+    assert not (tmp_path / "metrics.md").exists()
+
+
+def test_script_with_featup(tmp_path):
+    # Lab machine only: every model gets its own FeatUp JBU pixel labels.
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("featup")
+    pytest.importorskip("timm")
+    pytest.importorskip("clip")
+    if not torch.cuda.is_available():
+        pytest.skip("FeatUp runs on a CUDA machine")
+    models = ["dinov2_vits14", "clip_vitb16", "dino_vits16", "vit_s16_sup"]
+    device = os.environ.get("SEESAW_DEVICE", "cuda")
+    main(["--images", IMAGE1, "--models", *models, "--runs", "1", "--device", device, "--out", str(tmp_path)])
+    data = json.loads((tmp_path / "metrics.json").read_text())
+    rows = {r["model_id"]: r for r in data["images"]["image1"]}
+    assert set(rows) == set(models)
+    for row in rows.values():
+        assert row["upsampler"] == "featup_jbu", row
+        assert row["featup"]["ms"]["median"] > 0
+        assert row["featup"]["execution"] == "cuda kernel"
+        assert 0.0 <= row["ari_vs_a"] <= 1.0
+    assert data["environment"]["upsampler"] == "featup"
+    assert "FeatUp JBU" in (tmp_path / "metrics.md").read_text()
