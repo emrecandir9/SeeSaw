@@ -2,7 +2,8 @@
 preparation and the CLS-to-patch attention hook for q/k/v attention modules
 (DINOv2, DINO v1, timm ViT)."""
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 import numpy as np
 import torch
@@ -17,6 +18,8 @@ class EncoderOutput:
     features: np.ndarray  # (grid*grid, dim) float32, L2-normalized rows
     patch_attention: np.ndarray  # (grid, grid) float32, CLS-to-patch, mean over heads
     attention_row_sum: float  # full CLS row incl. CLS itself; ~1.0
+    # FeatUp mode only: () -> (224*224, dim) float32 pixel features, L2-normalized, row-major.
+    upsample: Callable[[], np.ndarray] | None = field(default=None, repr=False)
 
 
 def pick_device(pref: str = "auto") -> str:

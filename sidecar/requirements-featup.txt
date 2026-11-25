@@ -1,0 +1,6 @@
+# FeatUp's JBU upsampler (E2), CUDA machines only (the lab machine). Install after requirements-ml.txt:
+#   pip install --no-deps --no-build-isolation -r requirements-featup.txt
+# --no-deps: FeatUp pins timm==0.4.12 and pulls training packages; the sidecar only uses
+# featup.upsamplers, which needs torch and the two compiled kernels.
+# The build compiles a CUDA extension: nvcc must match torch's CUDA (e.g. CUDA_HOME=/usr/local/cuda-13.4).
+featup @ git+https://github.com/mhamilton723/FeatUp.git@6b5a6c0e91f75e69194807128dcbc39c3084a30d
