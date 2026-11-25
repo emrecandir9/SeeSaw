@@ -135,3 +135,12 @@ def test_assign_nearest_ties_take_lowest_index():
     centroids = np.array([[0, 1], [1, 0], [1, 0]], dtype=np.float32)
     labels = assign_nearest(np.array([[1, 0], [0.5, 0.5]], dtype=np.float32), centroids)
     np.testing.assert_array_equal(labels, [1, 0])
+
+
+def test_assign_nearest_uses_euclidean_not_dot_product():
+    # K-means centroids are means of unit vectors, so their lengths differ.
+    from processing.grouping import assign_nearest
+
+    centroids = np.array([[0.4, 0.0], [1.0, 0.0]], dtype=np.float32)
+    labels = assign_nearest(np.array([[0.5, 0.0]], dtype=np.float32), centroids)
+    np.testing.assert_array_equal(labels, [0])  # distance 0.1 vs 0.5; the dot product would pick 1

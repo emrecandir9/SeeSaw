@@ -133,7 +133,9 @@ def test_clip_features_follow_featup_path(encoders):
 
     with torch.inference_mode():
         spatial = enc.model.get_visual_features(to_input(image, IMAGENET_MEAN, IMAGENET_STD, enc.device), include_cls=False)
-    expected = torch.nn.functional.normalize(spatial[0].permute(1, 2, 0).reshape(196, -1).float(), dim=-1)
+    from models.base import channel_norm
+
+    expected = torch.nn.functional.normalize(channel_norm(spatial[0].permute(1, 2, 0).reshape(196, -1).float()), dim=-1)
     np.testing.assert_allclose(out.features, expected.cpu().numpy(), atol=1e-5)
 
 
@@ -159,3 +161,11 @@ def test_channel_norm_matches_featup_layernorm():
 
     x = torch.randn(256, 384)
     torch.testing.assert_close(channel_norm(x), torch.nn.LayerNorm(384)(x).detach(), atol=1e-6, rtol=1e-6)
+
+
+@pytest.mark.parametrize("model_id", CANDIDATES)
+def test_features_are_channel_normed(encoders, model_id):
+    # FeatUp's featurizers (use_norm=True) apply ChannelNorm for every backbone, as for model A:
+    # after LayerNorm each token has zero mean, which L2 normalization keeps.
+    out = encoders[model_id].encode(load_image())
+    np.testing.assert_allclose(out.features.mean(axis=1), 0.0, atol=1e-5)

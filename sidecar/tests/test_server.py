@@ -222,11 +222,18 @@ def test_featup_kernel_missing_refuses(monkeypatch, capsys):
 
     from server import main
 
+    import types
+
     _hide_featup(monkeypatch)
-    monkeypatch.setitem(sys.modules, "adaptive_conv_cuda_impl", None)  # FeatUp without its compiled kernel
+    # A FeatUp package that imports, without its compiled kernel (a partial install).
+    monkeypatch.setitem(sys.modules, "featup", types.ModuleType("featup"))
+    monkeypatch.setitem(sys.modules, "featup.upsamplers", types.ModuleType("featup.upsamplers"))
+    monkeypatch.setitem(sys.modules, "adaptive_conv_cuda_impl", None)
     with pytest.raises(SystemExit):
         main([])  # featup is the default
-    assert "--upsampler nearest" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "--upsampler nearest" in err
+    assert "adaptive_conv_cuda_impl" in err
 
 
 def test_mock_ignores_upsampler(monkeypatch):

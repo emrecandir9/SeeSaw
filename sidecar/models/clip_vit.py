@@ -4,7 +4,7 @@ CLIP fork, the one FeatUp uses (`get_visual_features`)."""
 import numpy as np
 import torch
 
-from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, finish, synchronize, to_input
+from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, channel_norm, finish, synchronize, to_input
 
 
 class MHACls:
@@ -53,4 +53,4 @@ class ClipEncoder:
         x = to_input(image, IMAGENET_MEAN, IMAGENET_STD, self.device)
         spatial = self.model.get_visual_features(x, include_cls=False)  # (1, 512, 14, 14)
         tokens = spatial[0].permute(1, 2, 0).reshape(self.grid * self.grid, -1)
-        return finish(tokens, self._attention.cls_row[0], self.grid)
+        return finish(channel_norm(tokens), self._attention.cls_row[0], self.grid)  # FeatUp use_norm, as model A

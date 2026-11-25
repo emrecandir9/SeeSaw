@@ -91,6 +91,34 @@ def test_featup_probe(backend):
     assert any(len(np.unique(b)) > 1 for b in blocks), "labels are still patch blocks"
 
 
+class NoUpsample:
+    """The same encoder with FeatUp switched off: the nearest path on identical groups."""
+
+    def __init__(self, encoder):
+        self.inner, self.device = encoder, encoder.device
+
+    def encode(self, image):
+        out = self.inner.encode(image)
+        out.upsample = None
+        return out
+
+    def synchronize(self):
+        self.inner.synchronize()
+
+
+@pytest.mark.parametrize("name", ["image1.png", "image2.png"])
+def test_pixel_ids_follow_patch_ids(encoder, name):
+    # Pixel IDs must use the height-ordered centroids, i.e. mostly agree with the nearest-mode
+    # patch labels (the IDs attention and history use); with raw K-means order they would not.
+    from models.dinov2 import RealBackend
+
+    image = load(name)
+    pixel = decode_label_png(probe(RealBackend(encoder, ProbeHistory()), image)["cluster_map_png_base64"])
+    patch = decode_label_png(probe(RealBackend(NoUpsample(encoder), ProbeHistory()), image)["cluster_map_png_base64"])
+    agreement = (pixel == patch).mean()
+    assert agreement > 0.7, agreement
+
+
 def test_featup_uniform_image(backend):
     result = probe(backend, np.full((224, 224, 3), 128, dtype=np.uint8))
     labels = decode_label_png(result["cluster_map_png_base64"])

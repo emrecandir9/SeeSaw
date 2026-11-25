@@ -5,7 +5,7 @@ import warnings
 import numpy as np
 import torch
 
-from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, QKVClsAttention, finish, synchronize, to_input
+from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, QKVClsAttention, channel_norm, finish, synchronize, to_input
 
 HUB_REPO = "facebookresearch/dino:7c446df5b9f45747937fb0d72314eb9f7b66930a"
 
@@ -33,4 +33,4 @@ class DinoV1Encoder:
         x = to_input(image, IMAGENET_MEAN, IMAGENET_STD, self.device)
         # Last block output after the final norm, as FeatUp's "token" features.
         tokens = self.model.get_intermediate_layers(x, n=1)[0][0, 1:]
-        return finish(tokens, self._attention.cls_row[0], self.grid)
+        return finish(channel_norm(tokens), self._attention.cls_row[0], self.grid)  # FeatUp use_norm, as model A

@@ -5,7 +5,7 @@ import os
 import numpy as np
 import torch
 
-from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, QKVClsAttention, finish, synchronize, to_input
+from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, QKVClsAttention, channel_norm, finish, synchronize, to_input
 
 TIMM_NAME = "vit_small_patch16_224.augreg_in21k_ft_in1k"
 
@@ -36,4 +36,4 @@ class VitSupEncoder:
         # ImageNet mean/std like FeatUp, not timm's 0.5/0.5 (see models/base.py).
         x = to_input(image, IMAGENET_MEAN, IMAGENET_STD, self.device)
         tokens = self.model.forward_features(x)[0, self.model.num_prefix_tokens :]  # after final norm
-        return finish(tokens, self._attention.cls_row[0], self.grid)
+        return finish(channel_norm(tokens), self._attention.cls_row[0], self.grid)  # FeatUp use_norm, as model A

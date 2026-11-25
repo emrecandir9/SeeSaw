@@ -27,7 +27,9 @@ class FeatUpUnavailable(RuntimeError):
 def check_available() -> None:
     """Raise FeatUpUnavailable unless FeatUp and its compiled kernels import."""
     try:
-        import featup.upsamplers  # noqa: F401  (imports adaptive_conv_cuda_impl and adaptive_conv_cpp_impl)
+        import featup.upsamplers  # noqa: F401  (loads torch first, which the kernels need)
+        import adaptive_conv_cuda_impl  # noqa: F401  compiled kernels: a partial install has the package without them
+        import adaptive_conv_cpp_impl  # noqa: F401
     except ImportError as exc:
         raise FeatUpUnavailable(f"FeatUp is not available ({exc}); {INSTALL_HINT}") from None
 
