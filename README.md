@@ -8,6 +8,8 @@ The project reimplements *See/Saw: Embodied Probing of Vision Transformer Attent
 
 Sprint: 25 November to 9 December 2026. No code yet: the repository holds the plan and the team workflow.
 
+Engine: **Godot 4.7.2-stable** (standard build).
+
 | Date | Milestone |
 | --- | --- |
 | 1 Dec | Single-model end-to-end VR loop on the lab PC with measured latency; model B chosen |
