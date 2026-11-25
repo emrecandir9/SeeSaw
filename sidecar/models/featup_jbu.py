@@ -9,8 +9,6 @@ paths give the same output.
 import hashlib
 from pathlib import Path
 
-import torch
-
 FEATUP_COMMIT = "6b5a6c0e91f75e69194807128dcbc39c3084a30d"
 CHECKPOINT_URL = (
     "https://marhamilresearch4.blob.core.windows.net/feature-upsampling-public/pretrained/dinov2_jbu_stack_cocostuff.ckpt"
@@ -41,6 +39,8 @@ def verify_checkpoint(path: Path) -> None:
 
 
 def checkpoint_path() -> Path:
+    import torch
+
     path = Path(torch.hub.get_dir()) / "checkpoints" / CHECKPOINT_URL.rsplit("/", 1)[1]
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -49,9 +49,10 @@ def checkpoint_path() -> Path:
     return path
 
 
-def load_jbu(device: str, dim: int = 384) -> tuple[torch.nn.Module, str]:
-    """FeatUp's JBUStack with the pinned weights, and the execution path for the A4 record."""
+def load_jbu(device: str, dim: int = 384):
+    """FeatUp's JBUStack (torch module) with the pinned weights, and the execution path for the A4 record."""
     check_available()
+    import torch
     from featup.upsamplers import JBUStack
 
     state = torch.load(checkpoint_path(), map_location="cpu", weights_only=True)["state_dict"]

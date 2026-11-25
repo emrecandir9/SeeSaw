@@ -2,7 +2,7 @@
 
 Python server that runs the vision models for See/Saw. The Godot client posts a 224 × 224 capture to `POST /probe` and gets back an 8-group label map and per-group attention for each requested model. The contract is in [docs/api.md](../docs/api.md).
 
-Owner: Emre. Status: contract draft, mock mode, and DINOv2 ViT-S/14 with nearest-upsampled labels. FeatUp (E2), matching (E3) and model B (E4) come next.
+Owner: Emre. Status: contract draft, mock mode, DINOv2 ViT-S/14 with FeatUp JBU pixel labels (E2; nearest labels where FeatUp is not installed), model B comparison script (E4). Matching (E3) and paired inference (E4) come next.
 
 ## Setup
 
@@ -40,19 +40,39 @@ Mock mode, no model or GPU needed:
 python server.py --mock
 ```
 
-Real model (downloads the DINOv2 weights, about 90 MB, into the torch hub cache on first start, then warms up):
+Real model with FeatUp pixel labels (lab machine; downloads the DINOv2 weights, about 90 MB, and FeatUp's 2 MB checkpoint into the torch hub cache on first start, then warms up):
 
 ```bash
 python server.py
 ```
 
-Useful flags: `--host 0.0.0.0` to accept other machines, `--port 8765`, `--device auto|cuda|mps|cpu`, and for mock mode `--scenario NAME` and `--delay-ms N`. See `python server.py --help` and the mock section of [docs/api.md](../docs/api.md).
+Without FeatUp (Mac, Windows laptops): the default `--upsampler featup` refuses to start, so choose the coarse labels explicitly:
+
+```bash
+python server.py --upsampler nearest
+```
+
+Useful flags: `--host 0.0.0.0` to accept other machines, `--port 8765`, `--device auto|cuda|mps|cpu`, `--upsampler featup|nearest`, and for mock mode `--scenario NAME` and `--delay-ms N`. See `python server.py --help` and the mock section of [docs/api.md](../docs/api.md).
 
 Check it is up:
 
 ```bash
 curl http://127.0.0.1:8765/health
 ```
+
+## FeatUp (E2, CUDA machines only)
+
+FeatUp's JBU upsampler needs its compiled CUDA kernel, so it installs only where `nvcc` matches torch's CUDA version. After `requirements-ml.txt`:
+
+```bash
+pip install --no-deps --no-build-isolation -r requirements-featup.txt
+```
+
+On the CREMI machine jessica (RTX 4000 Ada) the environment lives on the local disk: `. /local/mucandy/seesaw/env.sh` activates it and sets `CUDA_HOME=/usr/local/cuda-13.4`, the only CUDA install there with `nvcc`; torch is `2.15.0+cu134` from `https://download.pytorch.org/whl/cu134`.
+
+How a probe is computed (paper §2, plan p.5): DINOv2 patch tokens go through FeatUp's ChannelNorm (a LayerNorm without trained weights); K-means (K=8) runs on those, L2-normalized; FeatUp's JBU upsamples them 16×16 → 256×256 guided by the input image; they are resized to 224×224, L2-normalized, and each pixel takes its nearest patch-level centroid. Group attention stays the mean of the patch attention over each group's patches.
+
+A4 record, printed at startup: `upsampler=featup_jbu execution=cuda kernel checkpoint=<url> sha256=<hash>`. Pinned: FeatUp commit `6b5a6c0e91f75e69194807128dcbc39c3084a30d`, checkpoint `dinov2_jbu_stack_cocostuff.ckpt` (SHA-256 checked before loading, see `models/featup_jbu.py`). Our pinned DINOv2 gives the same features and upsampled output as FeatUp's own hub model (`tests/test_featup.py`, to 1e-4).
 
 ## Tests
 
@@ -93,6 +113,7 @@ python tools/make_fixtures.py --with-real   # also recompute model A with DINOv2
 | `mock.py` | Mock backend and scenarios |
 | `models/base.py` | Shared encoder pieces: output type, devices, input normalization, CLS attention hook |
 | `models/dinov2.py` | DINOv2 loading and the real backend |
+| `models/featup_jbu.py` | FeatUp JBU upsampler: pinned checkpoint, availability check |
 | `models/clip_vit.py`, `dino_v1.py`, `vit_sup.py`, `candidates.py` | Model B candidate encoders and the registry |
 | `tools/compare_models.py` | Model B comparison script |
 | `processing/grouping.py` | K-means, group numbering, group attention, upsampling, PNG (numpy only) |
@@ -101,6 +122,6 @@ python tools/make_fixtures.py --with-real   # also recompute model A with DINOv2
 
 ## Notes
 
-- DINOv2 comes from the `facebookresearch/dinov2` torch hub at a pinned commit (`HUB_REPO` in `models/dinov2.py`). At E2 the loader switches to FeatUp's hub so the backbone matches FeatUp's upsampler (plan p.7); see the `TODO(E2)` there.
+- DINOv2 comes from the `facebookresearch/dinov2` torch hub at a pinned commit (`HUB_REPO` in `models/dinov2.py`); only the upsampler comes from FeatUp. Plan p.7 allows another copy of the backbone if it gives the same features, which `tests/test_featup.py` checks.
 - Groups are numbered by image-space height (top group = 0) until matching lands.
 - Timings measured on a laptop are for debugging only. Reported latencies come from the lab PC.
