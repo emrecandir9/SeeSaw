@@ -4,7 +4,7 @@ CLIP fork, the one FeatUp uses (`get_visual_features`)."""
 import numpy as np
 import torch
 
-from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, channel_norm, finish, synchronize, to_input
+from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, channel_norm, finish, jbu_upsample, load_upsampler, synchronize, to_input
 
 
 class MHACls:
@@ -32,10 +32,11 @@ class ClipEncoder:
     patch = 16
     grid = 14
 
-    def __init__(self, device: str):
+    def __init__(self, device: str, upsampler: str = "nearest"):
         import clip
 
         self.device = device
+        self._jbu, self.execution_path = load_upsampler(device, self.model_id, upsampler)
         model, _ = clip.load("ViT-B/16", device="cpu", jit=False)
         # clip.load gives fp16 weights on CUDA; load on CPU and keep fp32 for a fair comparison.
         # Only the image tower goes to the device: the text tower is never used.
@@ -53,4 +54,8 @@ class ClipEncoder:
         x = to_input(image, IMAGENET_MEAN, IMAGENET_STD, self.device)
         spatial = self.model.get_visual_features(x, include_cls=False)  # (1, 512, 14, 14)
         tokens = spatial[0].permute(1, 2, 0).reshape(self.grid * self.grid, -1)
-        return finish(channel_norm(tokens), self._attention.cls_row[0], self.grid)  # FeatUp use_norm, as model A
+        low = channel_norm(tokens)  # FeatUp use_norm, as model A
+        out = finish(low, self._attention.cls_row[0], self.grid)
+        if self._jbu is not None:
+            out.upsample = lambda: jbu_upsample(self._jbu, low, x, self.grid)
+        return out

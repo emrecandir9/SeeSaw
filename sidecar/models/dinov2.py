@@ -12,7 +12,14 @@ import numpy as np
 import torch
 
 from contract import GRID, IMAGE_SIZE, K, ContractError, ProbeRequest, build_result, ok_body, unavailable
-from processing.grouping import assign_nearest, cluster_patches, group_attention, relabel_by_height, upsample_nearest
+from processing.grouping import (
+    cluster_patches,
+    group_attention,
+    order_centroids,
+    pixel_labels,
+    relabel_by_height,
+    upsample_nearest,
+)
 from processing.history import ProbeHistory
 
 from models.base import (  # noqa: F401
@@ -22,6 +29,7 @@ from models.base import (  # noqa: F401
     QKVClsAttention,
     channel_norm,
     finish,
+    jbu_upsample,
     pick_device,
     synchronize,
     to_input,
@@ -66,17 +74,8 @@ class Dinov2Encoder:
         low = channel_norm(tokens)
         out = finish(low, self._attention.cls_row[0], GRID)
         if self._jbu is not None:
-            out.upsample = lambda: self._upsample(low, x)
+            out.upsample = lambda: jbu_upsample(self._jbu, low, x, GRID)  # 16x16 -> 256x256 -> 224x224
         return out
-
-    @torch.inference_mode()
-    def _upsample(self, low: torch.Tensor, x: torch.Tensor) -> np.ndarray:
-        """FeatUp JBU (16x16 -> 256x256, guided by the input image), resized to 224x224."""
-        grid = low.reshape(GRID, GRID, -1).permute(2, 0, 1)[None]  # (1, 384, 16, 16)
-        high = self._jbu(grid, x)  # (1, 384, 256, 256)
-        high = torch.nn.functional.interpolate(high, (IMAGE_SIZE, IMAGE_SIZE), mode="bilinear", align_corners=False)
-        high = torch.nn.functional.normalize(high, dim=1)
-        return high[0].permute(1, 2, 0).reshape(IMAGE_SIZE * IMAGE_SIZE, -1).float().cpu().numpy()
 
 
 class RealBackend:
@@ -112,11 +111,7 @@ class RealBackend:
 
         raw_labels, centroids = cluster_patches(out.features, K)
         patch_labels = relabel_by_height(raw_labels.reshape(GRID, GRID), K)
-        ordered = np.zeros_like(centroids)
-        for old in range(K):  # reorder centroids to the new IDs
-            mask = raw_labels.reshape(GRID, GRID) == old
-            if mask.any():
-                ordered[patch_labels[mask][0]] = centroids[old]
+        ordered = order_centroids(raw_labels, patch_labels, centroids)
         t2 = time.perf_counter()
 
         # Paper and plan p.6: group mean of the patch attention over each group's patches.
@@ -126,8 +121,7 @@ class RealBackend:
             f0 = time.perf_counter()
             pixels = out.upsample()  # (224*224, 384)
             featup_ms = (time.perf_counter() - f0) * 1000
-            present = np.unique(patch_labels)  # empty groups have no centroid to assign to
-            labels = present[assign_nearest(pixels, ordered[present])].astype(np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE)
+            labels = pixel_labels(pixels, patch_labels, ordered, (IMAGE_SIZE, IMAGE_SIZE))
             timings["featup"] = round(featup_ms, 2)
             upsampler = "featup_jbu"
         else:

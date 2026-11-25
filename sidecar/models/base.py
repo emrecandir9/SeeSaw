@@ -53,6 +53,28 @@ def channel_norm(tokens: torch.Tensor) -> torch.Tensor:
     return torch.nn.functional.layer_norm(tokens, tokens.shape[-1:])
 
 
+def load_upsampler(device: str, model_id: str, upsampler: str):
+    """(FeatUp JBU module, execution path) in featup mode, (None, None) in nearest mode."""
+    if upsampler not in ("nearest", "featup"):
+        raise ValueError(f"upsampler must be 'nearest' or 'featup', got {upsampler!r}")
+    if upsampler == "nearest":
+        return None, None
+    from models.featup_jbu import load_jbu
+
+    return load_jbu(device, model_id)
+
+
+@torch.inference_mode()
+def jbu_upsample(jbu: torch.nn.Module, low: torch.Tensor, x: torch.Tensor, grid: int) -> np.ndarray:
+    """FeatUp JBU on the channel-normed patch tokens (grid*grid, dim), guided by the input x,
+    16x up, resized to the input size if needed (DINOv2: 256 -> 224) -> (224*224, dim), L2-normalized."""
+    high = jbu(low.reshape(grid, grid, -1).permute(2, 0, 1)[None], x)
+    if high.shape[-2:] != x.shape[-2:]:
+        high = torch.nn.functional.interpolate(high, x.shape[-2:], mode="bilinear", align_corners=False)
+    high = torch.nn.functional.normalize(high.float(), dim=1)
+    return high[0].permute(1, 2, 0).reshape(-1, high.shape[1]).cpu().numpy()
+
+
 def finish(tokens: torch.Tensor, cls_row: torch.Tensor, grid: int) -> EncoderOutput:
     """Patch tokens (grid*grid, dim) and the full CLS attention row (1 + grid*grid,)."""
     features = torch.nn.functional.normalize(tokens.float(), dim=-1)

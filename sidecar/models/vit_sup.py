@@ -5,7 +5,7 @@ import os
 import numpy as np
 import torch
 
-from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, QKVClsAttention, channel_norm, finish, synchronize, to_input
+from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, QKVClsAttention, channel_norm, finish, jbu_upsample, load_upsampler, synchronize, to_input
 
 TIMM_NAME = "vit_small_patch16_224.augreg_in21k_ft_in1k"
 
@@ -15,7 +15,7 @@ class VitSupEncoder:
     patch = 16
     grid = 14
 
-    def __init__(self, device: str):
+    def __init__(self, device: str, upsampler: str = "nearest"):
         import huggingface_hub.constants
         import timm
 
@@ -24,6 +24,7 @@ class VitSupEncoder:
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
         huggingface_hub.constants.HF_HUB_DISABLE_XET = os.environ["HF_HUB_DISABLE_XET"].upper() in {"1", "ON", "YES", "TRUE"}
         self.device = device
+        self._jbu, self.execution_path = load_upsampler(device, self.model_id, upsampler)
         self.model = timm.create_model(TIMM_NAME, pretrained=True).eval().to(device)
         self.last_attention_module = self.model.blocks[-1].attn
         self._attention = QKVClsAttention(self.last_attention_module)
@@ -36,4 +37,8 @@ class VitSupEncoder:
         # ImageNet mean/std like FeatUp, not timm's 0.5/0.5 (see models/base.py).
         x = to_input(image, IMAGENET_MEAN, IMAGENET_STD, self.device)
         tokens = self.model.forward_features(x)[0, self.model.num_prefix_tokens :]  # after final norm
-        return finish(channel_norm(tokens), self._attention.cls_row[0], self.grid)  # FeatUp use_norm, as model A
+        low = channel_norm(tokens)  # FeatUp use_norm, as model A
+        out = finish(low, self._attention.cls_row[0], self.grid)
+        if self._jbu is not None:
+            out.upsample = lambda: jbu_upsample(self._jbu, low, x, self.grid)
+        return out

@@ -5,7 +5,7 @@ import warnings
 import numpy as np
 import torch
 
-from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, QKVClsAttention, channel_norm, finish, synchronize, to_input
+from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, QKVClsAttention, channel_norm, finish, jbu_upsample, load_upsampler, synchronize, to_input
 
 HUB_REPO = "facebookresearch/dino:7c446df5b9f45747937fb0d72314eb9f7b66930a"
 
@@ -15,8 +15,9 @@ class DinoV1Encoder:
     patch = 16
     grid = 14
 
-    def __init__(self, device: str):
+    def __init__(self, device: str, upsampler: str = "nearest"):
         self.device = device
+        self._jbu, self.execution_path = load_upsampler(device, self.model_id, upsampler)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             # skip_validation: see models/dinov2.py (GitHub API rate limit); the commit is on DINO's main.
@@ -33,4 +34,8 @@ class DinoV1Encoder:
         x = to_input(image, IMAGENET_MEAN, IMAGENET_STD, self.device)
         # Last block output after the final norm, as FeatUp's "token" features.
         tokens = self.model.get_intermediate_layers(x, n=1)[0][0, 1:]
-        return finish(channel_norm(tokens), self._attention.cls_row[0], self.grid)  # FeatUp use_norm, as model A
+        low = channel_norm(tokens)  # FeatUp use_norm, as model A
+        out = finish(low, self._attention.cls_row[0], self.grid)
+        if self._jbu is not None:
+            out.upsample = lambda: jbu_upsample(self._jbu, low, x, self.grid)
+        return out

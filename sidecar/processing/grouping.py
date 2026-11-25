@@ -76,6 +76,27 @@ def assign_nearest(features: np.ndarray, centroids: np.ndarray) -> np.ndarray:
     return distances.argmin(1).astype(np.uint8)
 
 
+def order_centroids(raw_labels: np.ndarray, patch_labels: np.ndarray, centroids: np.ndarray) -> np.ndarray:
+    """Reorder K-means centroids (k, D) from raw IDs to the height-ordered patch IDs.
+    raw_labels and patch_labels are the same patches before/after relabel_by_height;
+    empty groups get a zero row."""
+    raw = np.asarray(raw_labels).ravel()
+    new = np.asarray(patch_labels).ravel()
+    ordered = np.zeros_like(centroids)
+    for old in range(len(centroids)):
+        mask = raw == old
+        if mask.any():
+            ordered[new[mask][0]] = centroids[old]
+    return ordered
+
+
+def pixel_labels(pixels: np.ndarray, patch_labels: np.ndarray, ordered: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+    """FeatUp pixel features (H*W, D) -> (H, W) uint8 IDs: each pixel takes the nearest
+    height-ordered centroid among the groups present in the patches (empty groups have none)."""
+    present = np.unique(patch_labels)
+    return present[assign_nearest(pixels, ordered[present])].astype(np.uint8).reshape(shape)
+
+
 def cluster_patches(features: np.ndarray, k: int = 8, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
     """K-means on patch features. Returns (labels (N,), centroids (k, D))."""
     import warnings

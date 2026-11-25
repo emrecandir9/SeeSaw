@@ -1,19 +1,38 @@
-"""FeatUp's JBU upsampler for DINOv2 ViT-S/14, with pinned code and checkpoint.
+"""FeatUp's JBU upsamplers, with pinned code and checkpoints, one per backbone.
 
-The backbone stays ours (models/dinov2.py, pinned hub commit); only the upsampler
-comes from FeatUp. FeatUp's own hub model wraps the same dinov2_vits14 features plus
-a ChannelNorm (models/base.py: channel_norm); tests/test_featup.py checks that both
-paths give the same output.
+The backbones stay ours (models/dinov2.py and the candidates, pinned); only the
+upsampler comes from FeatUp. Each checkpoint was trained on its own FeatUp
+featurizer plus a ChannelNorm (models/base.py: channel_norm); tests/test_featup.py
+checks that our backbones give the same output as FeatUp's hub models.
 """
 
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 FEATUP_COMMIT = "6b5a6c0e91f75e69194807128dcbc39c3084a30d"
-CHECKPOINT_URL = (
-    "https://marhamilresearch4.blob.core.windows.net/feature-upsampling-public/pretrained/dinov2_jbu_stack_cocostuff.ckpt"
-)
-CHECKPOINT_SHA256 = "438dad4dedb3c3ba4b7fa13d1c8eb465dafd323dadc039afd04b15178ea7b38c"
+BASE_URL = "https://marhamilresearch4.blob.core.windows.net/feature-upsampling-public/pretrained/"
+
+
+@dataclass(frozen=True)
+class Checkpoint:
+    hub_name: str  # FeatUp's torch hub entry point
+    sha256: str
+    dim: int
+
+    @property
+    def url(self) -> str:
+        return f"{BASE_URL}{self.hub_name}_jbu_stack_cocostuff.ckpt"
+
+
+CHECKPOINTS = {  # by our model ID; SHA-256 of the files downloaded on jessica, 25 Nov 2026
+    "dinov2_vits14": Checkpoint("dinov2", "438dad4dedb3c3ba4b7fa13d1c8eb465dafd323dadc039afd04b15178ea7b38c", 384),
+    "clip_vitb16": Checkpoint("clip", "e5dfaae2f7409d29cd067a595b1de0009e093d5a1dac9ea93443596eda7f0a49", 512),
+    "dino_vits16": Checkpoint("dino16", "407dff491058280abfbf38647e9365bf6397bc53d03b13251ed5a6715ef8d1b2", 384),
+    "vit_s16_sup": Checkpoint("vit", "b7de0e4c641cdb180ed9b1e573117f7a98e40deca4055553fc5d59fb35b7c097", 384),
+}
+CHECKPOINT_URL = CHECKPOINTS["dinov2_vits14"].url  # model A, the one the server logs
+CHECKPOINT_SHA256 = CHECKPOINTS["dinov2_vits14"].sha256
 INSTALL_HINT = (
     "install it on a CUDA machine with `pip install --no-deps --no-build-isolation -r requirements-featup.txt` "
     "(needs nvcc matching torch's CUDA), or start with --upsampler nearest"
@@ -34,31 +53,32 @@ def check_available() -> None:
         raise FeatUpUnavailable(f"FeatUp is not available ({exc}); {INSTALL_HINT}") from None
 
 
-def verify_checkpoint(path: Path) -> None:
+def verify_checkpoint(path: Path, expected: str) -> None:
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    if digest != CHECKPOINT_SHA256:
-        raise FeatUpUnavailable(f"{path}: SHA-256 {digest}, expected {CHECKPOINT_SHA256}; delete it to download again")
+    if digest != expected:
+        raise FeatUpUnavailable(f"{path}: SHA-256 {digest}, expected {expected}; delete it to download again")
 
 
-def checkpoint_path() -> Path:
+def checkpoint_path(checkpoint: Checkpoint) -> Path:
     import torch
 
-    path = Path(torch.hub.get_dir()) / "checkpoints" / CHECKPOINT_URL.rsplit("/", 1)[1]
+    path = Path(torch.hub.get_dir()) / "checkpoints" / checkpoint.url.rsplit("/", 1)[1]
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.hub.download_url_to_file(CHECKPOINT_URL, str(path), hash_prefix=CHECKPOINT_SHA256)
-    verify_checkpoint(path)
+        torch.hub.download_url_to_file(checkpoint.url, str(path), hash_prefix=checkpoint.sha256)
+    verify_checkpoint(path, checkpoint.sha256)
     return path
 
 
-def load_jbu(device: str, dim: int = 384):
-    """FeatUp's JBUStack (torch module) with the pinned weights, and the execution path for the A4 record."""
+def load_jbu(device: str, model_id: str = "dinov2_vits14"):
+    """FeatUp's JBUStack (torch module) with the model's pinned weights, and the execution path for the A4 record."""
     check_available()
     import torch
     from featup.upsamplers import JBUStack
 
-    state = torch.load(checkpoint_path(), map_location="cpu", weights_only=True)["state_dict"]
+    checkpoint = CHECKPOINTS[model_id]
+    state = torch.load(checkpoint_path(checkpoint), map_location="cpu", weights_only=True)["state_dict"]
     weights = {k.removeprefix("upsampler."): v for k, v in state.items() if k.startswith("upsampler.")}
-    jbu = JBUStack(dim)
+    jbu = JBUStack(checkpoint.dim)
     jbu.load_state_dict(weights, strict=True)
     return jbu.eval().to(device), "cuda kernel" if device.startswith("cuda") else "cpp fallback"
