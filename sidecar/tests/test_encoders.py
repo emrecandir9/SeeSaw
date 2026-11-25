@@ -135,3 +135,19 @@ def test_clip_features_follow_featup_path(encoders):
         spatial = enc.model.get_visual_features(to_input(image, IMAGENET_MEAN, IMAGENET_STD, enc.device), include_cls=False)
     expected = torch.nn.functional.normalize(spatial[0].permute(1, 2, 0).reshape(196, -1).float(), dim=-1)
     np.testing.assert_allclose(out.features, expected.cpu().numpy(), atol=1e-5)
+
+
+def test_vit_download_skips_xet(encoders):
+    # timm imports huggingface_hub first, so the env var alone is read too late.
+    import huggingface_hub.constants
+
+    if os.environ.get("HF_HUB_DISABLE_XET", "1").upper() in {"1", "ON", "YES", "TRUE"}:
+        assert huggingface_hub.constants.HF_HUB_DISABLE_XET is True
+
+
+def test_clip_text_tower_stays_on_cpu(encoders):
+    # Only the image tower runs; keeping the text tower off the GPU keeps the memory column honest.
+    enc = encoders["clip_vitb16"]
+    assert all(p.device.type == "cpu" for p in enc.model.transformer.parameters())
+    assert enc.model.token_embedding.weight.device.type == "cpu"
+    assert all(p.device.type == torch.device(enc.device).type for p in enc.model.visual.parameters())

@@ -16,10 +16,13 @@ class VitSupEncoder:
     grid = 14
 
     def __init__(self, device: str):
+        import huggingface_hub.constants
         import timm
 
         # Hugging Face's xet download failed on our network; the classic path works.
+        # huggingface_hub reads the variable once at import, so set its constant too.
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+        huggingface_hub.constants.HF_HUB_DISABLE_XET = os.environ["HF_HUB_DISABLE_XET"].upper() in {"1", "ON", "YES", "TRUE"}
         self.device = device
         self.model = timm.create_model(TIMM_NAME, pretrained=True).eval().to(device)
         self.last_attention_module = self.model.blocks[-1].attn

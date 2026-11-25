@@ -38,7 +38,9 @@ class ClipEncoder:
         self.device = device
         model, _ = clip.load("ViT-B/16", device="cpu", jit=False)
         # clip.load gives fp16 weights on CUDA; load on CPU and keep fp32 for a fair comparison.
-        self.model = model.float().eval().to(device)
+        # Only the image tower goes to the device: the text tower is never used.
+        self.model = model.float().eval()
+        self.model.visual.to(device)
         self.last_attention_module = self.model.visual.transformer.resblocks[-1].attn
         self._attention = MHACls(self.last_attention_module)
 
