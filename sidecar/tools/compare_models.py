@@ -41,7 +41,13 @@ PALETTE = np.array(
     [[230, 25, 75], [60, 180, 75], [255, 225, 25], [0, 130, 200],
      [245, 130, 48], [145, 30, 180], [70, 240, 240], [240, 50, 230]], dtype=np.float64
 )
-CELL, LABEL_H = IMAGE_SIZE, 28
+CELL, LABEL_H, HEADER_H = IMAGE_SIZE, 28, 58
+COLUMNS = [  # (title, explanation) per grid column
+    ("Input", "the 224 x 224 capture"),
+    ("Groups", "8 K-means groups, one colour each"),
+    ("Attention", "per patch: dark = low, yellow = high"),
+    ("Groups x attention", "group colour, brighter = more attention"),
+]
 
 
 def agreement(labels_a: np.ndarray, labels_b: np.ndarray) -> float:
@@ -117,13 +123,20 @@ def _heat(values: np.ndarray) -> np.ndarray:
 
 
 def render_grid(image: np.ndarray, rows: list[dict]) -> Image.Image:
-    """One row per model: input | groups | attention heatmap | groups x attention."""
-    grid = Image.new("RGB", (4 * CELL, len(rows) * (CELL + LABEL_H)), "white")
+    """Legend header, then one row per model: input | groups | attention heatmap | groups x attention."""
+    grid = Image.new("RGB", (4 * CELL, HEADER_H + len(rows) * (CELL + LABEL_H)), "white")
     draw = ImageDraw.Draw(grid)
     font = ImageFont.load_default(size=14)
+    small = ImageFont.load_default(size=11)
+    for j, (title, explanation) in enumerate(COLUMNS):
+        draw.text((j * CELL + 6, 6), title, fill="black", font=font)
+        draw.text((j * CELL + 6, 25), explanation, fill=(70, 70, 70), font=small)
+    bar = _heat(np.tile(np.linspace(0, 1, CELL - 12), (8, 1)))  # colour scale for the attention column
+    grid.paste(Image.fromarray(bar.astype(np.uint8)), (2 * CELL + 6, 42))
+    draw.line([(0, HEADER_H - 1), (4 * CELL, HEADER_H - 1)], fill=(180, 180, 180))
     img = image.astype(np.float64)
     for i, row in enumerate(rows):
-        top = i * (CELL + LABEL_H)
+        top = HEADER_H + i * (CELL + LABEL_H)
         labels = row["labels"]
         attn = np.asarray(row["patch_attention"], dtype=np.float64)
         attn_px = np.asarray(Image.fromarray((attn / attn.max() * 255).astype(np.uint8)).resize((CELL, CELL), Image.NEAREST)) / 255
@@ -137,7 +150,8 @@ def render_grid(image: np.ndarray, rows: list[dict]) -> Image.Image:
         for j, cell in enumerate(cells):
             grid.paste(Image.fromarray(np.clip(cell, 0, 255).astype(np.uint8)), (j * CELL, top + LABEL_H))
         ari = row.get("ari_vs_a")
-        text = f"{row['model_id']}   ARI vs A: {'-' if ari is None else f'{ari:.2f}'}   encode {row['encode_ms']['median']:.0f} ms"
+        name = f"{row['model_id']} (model A)" if row["model_id"] == MODEL_A else row["model_id"]
+        text = f"{name}   ARI vs A: {'-' if ari is None else f'{ari:.2f}'}   encode {row['encode_ms']['median']:.0f} ms"
         draw.text((6, top + 6), text, fill="black", font=font)
     return grid
 
@@ -191,6 +205,10 @@ def write_markdown(path: Path, env: dict, results: dict) -> None:
             )
         lines += ["", f"![{stem}]({stem}_grid.png)", ""]
     lines += [
+        "Grid columns: input | groups (8 K-means groups, one colour each) | attention heatmap (dark = low, yellow = high) |",
+        "groups x attention (group colour, brighter = more attention; roughly what the headset paints). One row per model, model A first.",
+        "Blocky squares are patches (16x16 grid for DINOv2, 14x14 for the others); FeatUp (E2) makes them follow object edges.",
+        "",
         "Peakedness = max / mean of the CLS-to-patch attention (1 = flat, useless for brightness).",
         "Top-3 share = fraction of all patch attention taken by the 3 strongest patches. A high value with high peakedness",
         "means a few 'sink' tokens soak up the attention (known for CLIP and supervised ViTs), not focus on objects:",

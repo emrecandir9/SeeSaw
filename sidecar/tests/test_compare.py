@@ -10,7 +10,7 @@ pytest.importorskip("torch")
 pytest.importorskip("sklearn")
 
 from tests.helpers import png_bytes, rgb_image  # noqa: E402
-from tools.compare_models import agreement, main, render_grid  # noqa: E402
+from tools.compare_models import COLUMNS, HEADER_H, agreement, main, render_grid  # noqa: E402
 
 IMAGE1 = str(Path(__file__).resolve().parent.parent / "fixtures" / "images" / "image1.png")
 
@@ -37,7 +37,16 @@ def test_render_grid_size():
     }
     grid = render_grid(image, [row, dict(row, model_id="y")])
     cell, label = 224, 28
-    assert grid.size == (4 * cell, 2 * (cell + label))
+    assert grid.size == (4 * cell, HEADER_H + 2 * (cell + label))
+    header = np.asarray(grid)[:HEADER_H]
+    for col in range(4):  # every column has a legend drawn in the header
+        assert (header[:, col * cell : (col + 1) * cell] < 128).any()
+
+
+def test_legend_names_every_column():
+    text = " ".join(" ".join(pair) for pair in COLUMNS).lower()
+    for word in ("input", "groups", "attention", "low", "high", "brighter"):
+        assert word in text
 
 
 def test_script_end_to_end(tmp_path):
@@ -59,6 +68,7 @@ def test_script_end_to_end(tmp_path):
         assert row["featup"] is None
     assert data["environment"]["device"]
     assert "Top-3 share" in (tmp_path / "metrics.md").read_text()
+    assert "Grid columns" in (tmp_path / "metrics.md").read_text()
 
 
 def test_bad_model_reported(tmp_path):
