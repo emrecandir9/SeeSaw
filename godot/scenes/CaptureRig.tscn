@@ -1,0 +1,17 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/xr/capture_rig.gd" id="1"]
+
+[node name="CaptureRig" type="Node3D"]
+script = ExtResource("1")
+
+[node name="RGB" type="SubViewport" parent="."]
+size = Vector2i(224, 224)
+render_target_update_mode = 0
+
+[node name="Camera" type="Camera3D" parent="RGB"]
+current = true
+fov = 70.0
+near = 0.05
+far = 100.0
+cull_mask = 1
