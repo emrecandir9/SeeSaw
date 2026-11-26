@@ -6,7 +6,7 @@ The project reimplements *See/Saw: Embodied Probing of Vision Transformer Attent
 
 ## Status
 
-Sprint: 25 November to 9 December 2026. No code yet: the repository holds the plan and the team workflow.
+Sprint: 25 November to 9 December 2026. G1 now has a standalone desktop/XR capture harness. Open `godot/project.godot` in **Godot 4.7.2-stable** and run it; desktop is the default and requires no headset. See [G1 controls, interfaces and pending acceptance](docs/g1-capture.md). Depth rendering, backend integration and physical Quest acceptance remain pending.
 
 | Date | Milestone |
 | --- | --- |
