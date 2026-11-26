@@ -1,0 +1,5 @@
+# Real model mode: everything in requirements.txt plus the model stack.
+-r requirements.txt
+torch==2.15.0
+torchvision==0.29.2
+scikit-learn==1.9.1
