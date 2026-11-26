@@ -105,6 +105,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--device", default="auto", help="auto, cuda, mps or cpu (real mode)")
     parser.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to accept other machines")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument(
+        "--upsampler",
+        default="featup",
+        choices=["featup", "nearest"],
+        help="real mode: featup = FeatUp JBU pixel labels (needs requirements-featup.txt and CUDA); "
+        "nearest = coarse patch labels (does not meet A4)",
+    )
     args = parser.parse_args(argv)
     if not args.mock and (args.scenario != "valid" or args.delay_ms):
         parser.error("--scenario and --delay-ms only work with --mock")
@@ -117,10 +124,22 @@ def main(argv: list[str] | None = None) -> None:
 
         backend, mode = MockBackend(FIXTURES_DIR, ProbeHistory()), "mock"
     else:
-        from models.dinov2 import Dinov2Encoder, RealBackend, pick_device
+        from models.featup_jbu import CHECKPOINT_SHA256, CHECKPOINT_URL, FeatUpUnavailable, check_available
 
-        backend, mode = RealBackend(Dinov2Encoder(pick_device(args.device)), ProbeHistory()), "real"
+        try:
+            if args.upsampler == "featup":
+                check_available()  # before the backbone loads, so a missing FeatUp fails fast
+            from models.dinov2 import Dinov2Encoder, RealBackend, pick_device
+
+            encoder = Dinov2Encoder(pick_device(args.device), upsampler=args.upsampler)
+        except FeatUpUnavailable as exc:
+            parser.error(str(exc))
+        backend, mode = RealBackend(encoder, ProbeHistory()), "real"
         backend.warm_up()
+        if args.upsampler == "featup":  # A4: checkpoint and execution path recorded
+            log.info("upsampler=featup_jbu execution=%s checkpoint=%s sha256=%s", encoder.execution_path, CHECKPOINT_URL, CHECKPOINT_SHA256)
+        else:
+            log.warning("upsampler=nearest: coarse patch labels, A4 not met")
 
     log.info("mode=%s device=%s models=%s", mode, backend.device, backend.models)
     import uvicorn

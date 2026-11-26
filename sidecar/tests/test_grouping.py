@@ -2,6 +2,8 @@ import numpy as np
 import pytest
 
 from processing.grouping import (
+    order_centroids,
+    pixel_labels,
     decode_label_png,
     encode_label_png,
     group_attention,
@@ -117,3 +119,50 @@ def test_cluster_patches_runs_single_threaded(monkeypatch):
     cluster_patches(features, 8)
     assert seen and seen[0], "no thread pools seen during fit"
     assert all(n == 1 for n in seen[0]), seen
+
+
+def test_assign_nearest_picks_closest():
+    from processing.grouping import assign_nearest
+
+    centroids = np.array([[1, 0], [0, 1], [-1, 0]], dtype=np.float32)
+    features = np.array([[0.9, 0.1], [0.1, 0.9], [-1, 0.2]], dtype=np.float32)
+    labels = assign_nearest(features, centroids)
+    assert labels.dtype == np.uint8
+    np.testing.assert_array_equal(labels, [0, 1, 2])
+
+
+def test_assign_nearest_ties_take_lowest_index():
+    from processing.grouping import assign_nearest
+
+    centroids = np.array([[0, 1], [1, 0], [1, 0]], dtype=np.float32)
+    labels = assign_nearest(np.array([[1, 0], [0.5, 0.5]], dtype=np.float32), centroids)
+    np.testing.assert_array_equal(labels, [1, 0])
+
+
+def test_assign_nearest_uses_euclidean_not_dot_product():
+    # K-means centroids are means of unit vectors, so their lengths differ.
+    from processing.grouping import assign_nearest
+
+    centroids = np.array([[0.4, 0.0], [1.0, 0.0]], dtype=np.float32)
+    labels = assign_nearest(np.array([[0.5, 0.0]], dtype=np.float32), centroids)
+    np.testing.assert_array_equal(labels, [0])  # distance 0.1 vs 0.5; the dot product would pick 1
+
+
+def test_order_centroids_follows_relabel():
+    raw = np.array([[2, 2], [0, 0]])  # raw group 2 on top -> new ID 0, raw 0 -> new ID 1, raw 1 empty
+    new = relabel_by_height(raw, 3)
+    centroids = np.array([[0.0, 1.0], [5.0, 5.0], [1.0, 0.0]])
+    ordered = order_centroids(raw, new, centroids)
+    np.testing.assert_array_equal(ordered[0], centroids[2])
+    np.testing.assert_array_equal(ordered[1], centroids[0])
+    np.testing.assert_array_equal(ordered[2], 0.0)  # empty group keeps no centroid
+
+
+def test_pixel_labels_skip_empty_groups():
+    patch_labels = np.array([[0, 0], [2, 2]])  # group 1 is empty
+    ordered = np.array([[1.0, 0.0], [0.6, 0.8], [0.0, 1.0]])
+    pixels = np.array([[0.6, 0.8]] * 4 + [[1.0, 0.0]] * 4 + [[0.0, 1.0]] * 4)  # first pixels sit on the empty centroid
+    labels = pixel_labels(pixels, patch_labels, ordered, (3, 4))
+    assert labels.shape == (3, 4) and labels.dtype == np.uint8
+    assert 1 not in labels
+    np.testing.assert_array_equal(labels.ravel()[4:], [0] * 4 + [2] * 4)
