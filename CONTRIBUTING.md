@@ -45,8 +45,13 @@ CI runs on every pull request and on every push to `main` and `develop`. It curr
 - no files larger than 50 MB
 - no committed `.godot/` cache, `.env` files or private keys
 - Python tests in `sidecar/`, once that folder has `requirements.txt` and `tests/`
+- Godot 4.7.2-stable imports `godot/` headless and parses every `.gd` file without errors, once `godot/project.godot` exists
 
-Add a Godot job once the team pins the Godot version. Make the `CI passed` job depend on every new job, so the branch rules never need changing.
+When you add a CI job, add it to the `needs` list of the `CI passed` job, so the branch rules never need changing.
+
+## Versions
+
+Everyone uses **Godot 4.7.2-stable** (standard build, not .NET). Don't open the project in another version: it rewrites project and scene files. To change the version, update `GODOT_VERSION` in [.github/workflows/ci.yml](.github/workflows/ci.yml) and this section in the same pull request.
 
 ## Releases
 
