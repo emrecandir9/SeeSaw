@@ -195,3 +195,56 @@ def test_mock_flags_require_mock(flags):
     with pytest.raises(SystemExit) as info:
         main(flags)
     assert info.value.code == 2  # argparse usage error, before any model is loaded
+
+
+def _hide_featup(monkeypatch):
+    import sys
+
+    for name in list(sys.modules):
+        if name == "featup" or name.startswith("featup."):
+            monkeypatch.delitem(sys.modules, name)
+
+
+def test_featup_missing_refuses_with_hint(monkeypatch, capsys):
+    import sys
+
+    from server import main
+
+    _hide_featup(monkeypatch)
+    monkeypatch.setitem(sys.modules, "featup", None)  # import featup -> ImportError
+    with pytest.raises(SystemExit):
+        main(["--upsampler", "featup"])
+    assert "--upsampler nearest" in capsys.readouterr().err
+
+
+def test_featup_kernel_missing_refuses(monkeypatch, capsys):
+    import sys
+
+    from server import main
+
+    import types
+
+    _hide_featup(monkeypatch)
+    # A FeatUp package that imports, without its compiled kernel (a partial install).
+    monkeypatch.setitem(sys.modules, "featup", types.ModuleType("featup"))
+    monkeypatch.setitem(sys.modules, "featup.upsamplers", types.ModuleType("featup.upsamplers"))
+    monkeypatch.setitem(sys.modules, "adaptive_conv_cuda_impl", None)
+    with pytest.raises(SystemExit):
+        main([])  # featup is the default
+    err = capsys.readouterr().err
+    assert "--upsampler nearest" in err
+    assert "adaptive_conv_cuda_impl" in err
+
+
+def test_mock_ignores_upsampler(monkeypatch):
+    import sys
+
+    import uvicorn
+
+    from server import main
+
+    calls = []
+    monkeypatch.setitem(sys.modules, "featup", None)
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: calls.append(kw))
+    main(["--mock"])
+    assert calls and calls[0]["port"] == 8765

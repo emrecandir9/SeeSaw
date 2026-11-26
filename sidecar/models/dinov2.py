@@ -7,82 +7,76 @@ same backbone FeatUp wraps.
 import logging
 import time
 import warnings
-from dataclasses import dataclass
 
 import numpy as np
 import torch
 
-from contract import GRID, K, ContractError, ProbeRequest, build_result, ok_body, unavailable
-from processing.grouping import cluster_patches, group_attention, relabel_by_height, upsample_nearest
+from contract import GRID, IMAGE_SIZE, K, ContractError, ProbeRequest, build_result, ok_body, unavailable
+from processing.grouping import assign_nearest, cluster_patches, group_attention, relabel_by_height, upsample_nearest
 from processing.history import ProbeHistory
+
+from models.base import (  # noqa: F401
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+    EncoderOutput,
+    QKVClsAttention,
+    channel_norm,
+    finish,
+    pick_device,
+    synchronize,
+    to_input,
+)
 
 HUB_REPO = "facebookresearch/dinov2:7764ea0f912e53c92e82eb78a2a1631e92725fc8"
 MODEL_ID = "dinov2_vits14"
-IMAGENET_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_STD = (0.229, 0.224, 0.225)
 log = logging.getLogger("seesaw.dinov2")
 
 
-def pick_device(pref: str = "auto") -> str:
-    if pref != "auto":
-        return pref
-    if torch.cuda.is_available():
-        return "cuda"
-    if torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
-
-
-@dataclass
-class EncoderOutput:
-    features: np.ndarray  # (256, 384) float32, L2-normalized rows
-    patch_attention: np.ndarray  # (16, 16) float32, CLS-to-patch, mean over heads
-    attention_row_sum: float  # full CLS row incl. CLS itself; ~1.0
-
-
 class Dinov2Encoder:
-    def __init__(self, device: str):
+    def __init__(self, device: str, upsampler: str = "nearest"):
+        if upsampler not in ("nearest", "featup"):
+            raise ValueError(f"upsampler must be 'nearest' or 'featup', got {upsampler!r}")
         self.device = device
-        # TODO(E2): load through FeatUp's hub (plan p.7) and take the backbone from it;
-        # keep the attention hook below. Verify FeatUp wraps this same dinov2_vits14.
+        self.upsampler = upsampler
+        self.execution_path: str | None = None
+        self._jbu = None
+        if upsampler == "featup":
+            # Our pinned backbone + FeatUp's upsampler weights; plan p.7 allows another copy of the
+            # backbone if it gives the same features (checked in tests/test_featup.py).
+            from models.featup_jbu import load_jbu
+
+            self._jbu, self.execution_path = load_jbu(device)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # xFormers availability notices
             # skip_validation: the fork check calls the GitHub API (60 requests/hour unauthenticated)
             # and fails when that limit is used up. HUB_REPO pins a commit on the official main branch.
             model = torch.hub.load(HUB_REPO, MODEL_ID, trust_repo=True, skip_validation=True, verbose=False)
         self.model = model.eval().to(device)
-        self._mean = torch.tensor(IMAGENET_MEAN, device=device).view(1, 3, 1, 1)
-        self._std = torch.tensor(IMAGENET_STD, device=device).view(1, 3, 1, 1)
-        self._cls_row: torch.Tensor | None = None
-        self.model.blocks[-1].attn.register_forward_pre_hook(self._capture_attention)
-
-    def _capture_attention(self, attn: torch.nn.Module, inputs: tuple) -> None:
-        """Recompute the last block's attention weights for the CLS query."""
-        x = inputs[0]
-        B, N, C = x.shape
-        qkv = attn.qkv(x).reshape(B, N, 3, attn.num_heads, C // attn.num_heads).permute(2, 0, 3, 1, 4)
-        q, k = qkv[0], qkv[1]  # (B, heads, N, d)
-        weights = ((q[:, :, :1] * attn.scale) @ k.transpose(-2, -1)).softmax(-1)  # (B, heads, 1, N)
-        self._cls_row = weights[:, :, 0, :].mean(1)  # (B, N), mean over heads
+        self._attention = QKVClsAttention(self.model.blocks[-1].attn)
 
     def synchronize(self) -> None:
-        if self.device.startswith("cuda"):
-            torch.cuda.synchronize()
-        elif self.device == "mps":
-            torch.mps.synchronize()
+        synchronize(self.device)
 
     @torch.inference_mode()
     def encode(self, image: np.ndarray) -> EncoderOutput:
-        x = torch.tensor(image, device=self.device).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-        x = (x - self._mean) / self._std
+        x = to_input(image, IMAGENET_MEAN, IMAGENET_STD, self.device)
         tokens = self.model.forward_features(x)["x_norm_patchtokens"][0]  # (256, 384)
-        features = torch.nn.functional.normalize(tokens, dim=-1)
-        cls_row = self._cls_row[0]
-        return EncoderOutput(
-            features=features.float().cpu().numpy(),
-            patch_attention=cls_row[1:].reshape(GRID, GRID).float().cpu().numpy(),
-            attention_row_sum=float(cls_row.sum()),
-        )
+        # FeatUp's featurizer output (use_norm=True): K-means centroids and FeatUp's
+        # upsampled features then live in the same space.
+        low = channel_norm(tokens)
+        out = finish(low, self._attention.cls_row[0], GRID)
+        if self._jbu is not None:
+            out.upsample = lambda: self._upsample(low, x)
+        return out
+
+    @torch.inference_mode()
+    def _upsample(self, low: torch.Tensor, x: torch.Tensor) -> np.ndarray:
+        """FeatUp JBU (16x16 -> 256x256, guided by the input image), resized to 224x224."""
+        grid = low.reshape(GRID, GRID, -1).permute(2, 0, 1)[None]  # (1, 384, 16, 16)
+        high = self._jbu(grid, x)  # (1, 384, 256, 256)
+        high = torch.nn.functional.interpolate(high, (IMAGE_SIZE, IMAGE_SIZE), mode="bilinear", align_corners=False)
+        high = torch.nn.functional.normalize(high, dim=1)
+        return high[0].permute(1, 2, 0).reshape(IMAGE_SIZE * IMAGE_SIZE, -1).float().cpu().numpy()
 
 
 class RealBackend:
@@ -94,7 +88,9 @@ class RealBackend:
 
     def warm_up(self) -> None:
         started = time.perf_counter()
-        self.encoder.encode(np.zeros((224, 224, 3), dtype=np.uint8))
+        out = self.encoder.encode(np.zeros((224, 224, 3), dtype=np.uint8))
+        if out.upsample is not None:
+            out.upsample()
         self.encoder.synchronize()
         log.info("warm-up on %s took %.0f ms", self.device, (time.perf_counter() - started) * 1000)
 
@@ -123,14 +119,26 @@ class RealBackend:
                 ordered[patch_labels[mask][0]] = centroids[old]
         t2 = time.perf_counter()
 
+        # Paper and plan p.6: group mean of the patch attention over each group's patches.
         attention = group_attention(patch_labels, out.patch_attention, K)
-        labels = upsample_nearest(patch_labels)
+        featup_ms = 0.0
+        if out.upsample is not None:
+            f0 = time.perf_counter()
+            pixels = out.upsample()  # (224*224, 384)
+            featup_ms = (time.perf_counter() - f0) * 1000
+            present = np.unique(patch_labels)  # empty groups have no centroid to assign to
+            labels = present[assign_nearest(pixels, ordered[present])].astype(np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE)
+            timings["featup"] = round(featup_ms, 2)
+            upsampler = "featup_jbu"
+        else:
+            labels = upsample_nearest(patch_labels)
+            upsampler = "nearest"
         t3 = time.perf_counter()
 
         timings["encode"] = round((t1 - t0) * 1000, 2)
         timings["cluster"] = round((t2 - t1) * 1000, 2)
-        timings["assign"] = round((t3 - t2) * 1000, 2)
+        timings["assign"] = round((t3 - t2) * 1000 - featup_ms, 2)
 
         self.history.store(req.session_id, MODEL_ID, req.probe_id, ordered)
-        result = build_result(MODEL_ID, labels, attention, "nearest", None, timings)
+        result = build_result(MODEL_ID, labels, attention, upsampler, None, timings)
         return ok_body(req.probe_id, "real", [result], 0.0)

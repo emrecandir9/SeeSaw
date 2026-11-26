@@ -187,3 +187,34 @@ def test_identical_features_leave_empty_groups():
     assert result["attention"][1:] == [0.0] * 7
     centroids = backend.history.get("s-1", "dinov2_vits14", "p-u")
     assert (centroids[1:] == 0).all()
+
+
+def test_features_follow_channel_norm(encoder):
+    import torch
+
+    from models.base import IMAGENET_MEAN, IMAGENET_STD, channel_norm, to_input
+
+    image = load("image1.png")
+    out = encoder.encode(image)
+    with torch.inference_mode():
+        tokens = encoder.model.forward_features(to_input(image, IMAGENET_MEAN, IMAGENET_STD, encoder.device))["x_norm_patchtokens"][0]
+        expected = torch.nn.functional.normalize(channel_norm(tokens.float()), dim=-1).cpu().numpy()
+    np.testing.assert_allclose(out.features, expected, atol=1e-5)
+
+
+class ConstantUpsampleEncoder(ConstantEncoder):
+    """One real group; pixel features point away from its centroid, so a zero-vector
+    centroid of an empty group would be nearer if empty groups took part."""
+
+    def encode(self, image):
+        out = super().encode(image)
+        out.upsample = lambda: -np.ones((224 * 224, 384), dtype=np.float32) / np.sqrt(384)
+        return out
+
+
+def test_empty_groups_never_take_pixels():
+    backend = RealBackend(ConstantUpsampleEncoder(), ProbeHistory())
+    (result,) = backend.handle(request(np.zeros((224, 224, 3), dtype=np.uint8), "p-e"), "valid")["results"]
+    assert result["upsampler"] == "featup_jbu"
+    labels = decode_label_png(result["cluster_map_png_base64"])
+    assert set(np.unique(labels)) == {0}
