@@ -84,9 +84,12 @@ jobs:
           else
             echo "No godot/project.godot yet; skipping."
           fi
+          if [ -f tools/test_g2.py ]; then
+            echo "g2=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install Godot ${{ env.GODOT_VERSION }}
-        if: steps.detect.outputs.present == 'true'
+        if: steps.detect.outputs.present == 'true' || steps.detect.outputs.g2 == 'true'
         run: |
           base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}"
           zip="Godot_v${GODOT_VERSION}_linux.x86_64.zip"
@@ -96,6 +99,17 @@ jobs:
           unzip -q "$zip"
           sudo mv "Godot_v${GODOT_VERSION}_linux.x86_64" /usr/local/bin/godot
           godot --version
+
+      - uses: actions/setup-python@v7
+        if: steps.detect.outputs.g2 == 'true'
+        with:
+          python-version: "3.11"
+
+      - name: G2 mock transport and lifecycle
+        if: steps.detect.outputs.g2 == 'true'
+        run: |
+          pip install -r sidecar/requirements.txt
+          python tools/test_g2.py --godot godot
 
       - name: Import project
         if: steps.detect.outputs.present == 'true'
