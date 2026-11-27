@@ -7,7 +7,6 @@ same backbone FeatUp wraps.
 import logging
 import time
 import warnings
-from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -16,28 +15,11 @@ from contract import GRID, K, ContractError, ProbeRequest, build_result, ok_body
 from processing.grouping import cluster_patches, group_attention, relabel_by_height, upsample_nearest
 from processing.history import ProbeHistory
 
+from models.base import IMAGENET_MEAN, IMAGENET_STD, EncoderOutput, QKVClsAttention, finish, pick_device, synchronize, to_input  # noqa: F401
+
 HUB_REPO = "facebookresearch/dinov2:7764ea0f912e53c92e82eb78a2a1631e92725fc8"
 MODEL_ID = "dinov2_vits14"
-IMAGENET_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_STD = (0.229, 0.224, 0.225)
 log = logging.getLogger("seesaw.dinov2")
-
-
-def pick_device(pref: str = "auto") -> str:
-    if pref != "auto":
-        return pref
-    if torch.cuda.is_available():
-        return "cuda"
-    if torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
-
-
-@dataclass
-class EncoderOutput:
-    features: np.ndarray  # (256, 384) float32, L2-normalized rows
-    patch_attention: np.ndarray  # (16, 16) float32, CLS-to-patch, mean over heads
-    attention_row_sum: float  # full CLS row incl. CLS itself; ~1.0
 
 
 class Dinov2Encoder:
@@ -51,38 +33,16 @@ class Dinov2Encoder:
             # and fails when that limit is used up. HUB_REPO pins a commit on the official main branch.
             model = torch.hub.load(HUB_REPO, MODEL_ID, trust_repo=True, skip_validation=True, verbose=False)
         self.model = model.eval().to(device)
-        self._mean = torch.tensor(IMAGENET_MEAN, device=device).view(1, 3, 1, 1)
-        self._std = torch.tensor(IMAGENET_STD, device=device).view(1, 3, 1, 1)
-        self._cls_row: torch.Tensor | None = None
-        self.model.blocks[-1].attn.register_forward_pre_hook(self._capture_attention)
-
-    def _capture_attention(self, attn: torch.nn.Module, inputs: tuple) -> None:
-        """Recompute the last block's attention weights for the CLS query."""
-        x = inputs[0]
-        B, N, C = x.shape
-        qkv = attn.qkv(x).reshape(B, N, 3, attn.num_heads, C // attn.num_heads).permute(2, 0, 3, 1, 4)
-        q, k = qkv[0], qkv[1]  # (B, heads, N, d)
-        weights = ((q[:, :, :1] * attn.scale) @ k.transpose(-2, -1)).softmax(-1)  # (B, heads, 1, N)
-        self._cls_row = weights[:, :, 0, :].mean(1)  # (B, N), mean over heads
+        self._attention = QKVClsAttention(self.model.blocks[-1].attn)
 
     def synchronize(self) -> None:
-        if self.device.startswith("cuda"):
-            torch.cuda.synchronize()
-        elif self.device == "mps":
-            torch.mps.synchronize()
+        synchronize(self.device)
 
     @torch.inference_mode()
     def encode(self, image: np.ndarray) -> EncoderOutput:
-        x = torch.tensor(image, device=self.device).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-        x = (x - self._mean) / self._std
+        x = to_input(image, IMAGENET_MEAN, IMAGENET_STD, self.device)
         tokens = self.model.forward_features(x)["x_norm_patchtokens"][0]  # (256, 384)
-        features = torch.nn.functional.normalize(tokens, dim=-1)
-        cls_row = self._cls_row[0]
-        return EncoderOutput(
-            features=features.float().cpu().numpy(),
-            patch_attention=cls_row[1:].reshape(GRID, GRID).float().cpu().numpy(),
-            attention_row_sum=float(cls_row.sum()),
-        )
+        return finish(tokens, self._attention.cls_row[0], GRID)
 
 
 class RealBackend:

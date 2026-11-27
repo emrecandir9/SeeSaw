@@ -23,7 +23,14 @@ pip install -r requirements.txt     # mock mode and tests only (Godot developers
 pip install -r requirements-ml.txt  # real model too (lab PC, Emre)
 ```
 
-On the lab PC, install the CUDA build of torch 2.15 first, following pytorch.org for the installed CUDA version, then `pip install -r requirements-ml.txt`.
+`requirements-ml.txt` includes Mark Hamilton's CLIP fork (the one FeatUp uses), whose `setup.py` needs `pkg_resources`. Install it with build isolation off:
+
+```bash
+pip install "setuptools<81" wheel
+pip install --no-build-isolation -r requirements-ml.txt
+```
+
+On the lab PC, install the CUDA build of torch 2.15 first, following pytorch.org for the installed CUDA version, then the two commands above. If Hugging Face downloads fail (seen on some networks), set `HF_HUB_DISABLE_XET=1`.
 
 ## Run
 
@@ -55,6 +62,14 @@ pytest -q
 
 CI installs only `requirements.txt`, so the real-model tests in `tests/test_dinov2.py` are skipped there. Run them locally with `requirements-ml.txt` installed; `SEESAW_DEVICE=cpu pytest -q tests/test_dinov2.py` forces the CPU path.
 
+## Model B comparison (E4)
+
+```bash
+python tools/compare_models.py --device auto
+```
+
+Runs DINOv2 (model A) and the candidates CLIP ViT-B/16 (`clip_vitb16`), DINO v1 ViT-S/16 (`dino_vits16`) and supervised ViT-S/16 (`vit_s16_sup`) on `fixtures/images/*.png` (or `--images ...`, each 224 × 224), 10 probes each (`--runs`). Writes `comparison-out/` (git-ignored): one grid per image (input, groups, attention heatmap, groups × attention) and `metrics.md` / `metrics.json` with encode and K-means time, memory, attention checks and agreement with model A (adjusted Rand index). Patch level only; FeatUp comes with E2. All candidates use ImageNet normalization and the token path FeatUp's upsamplers were trained on.
+
 ## Fixtures
 
 `fixtures/contract/` holds the contract fixtures used by mock mode and client tests. Regenerate with:
@@ -76,7 +91,10 @@ python tools/make_fixtures.py --with-real   # also recompute model A with DINOv2
 | `server.py` | FastAPI app and command line |
 | `contract.py` | Request parsing and validation, response bodies |
 | `mock.py` | Mock backend and scenarios |
-| `models/dinov2.py` | DINOv2 loading, CLS attention hook, real backend |
+| `models/base.py` | Shared encoder pieces: output type, devices, input normalization, CLS attention hook |
+| `models/dinov2.py` | DINOv2 loading and the real backend |
+| `models/clip_vit.py`, `dino_v1.py`, `vit_sup.py`, `candidates.py` | Model B candidate encoders and the registry |
+| `tools/compare_models.py` | Model B comparison script |
 | `processing/grouping.py` | K-means, group numbering, group attention, upsampling, PNG (numpy only) |
 | `processing/history.py` | Centroids of recent probes per session and model |
 | `tools/make_fixtures.py` | Fixture generator |

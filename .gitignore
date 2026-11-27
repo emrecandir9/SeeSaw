@@ -29,3 +29,6 @@ venv/
 Thumbs.db
 .vscode/
 .idea/
+
+# Model comparison output (sidecar/tools/compare_models.py)
+sidecar/comparison-out/
